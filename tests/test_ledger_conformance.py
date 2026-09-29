@@ -54,6 +54,13 @@ L_PROXIES = dict(ldl="hypercholesterolemia", bmi="obesity", systolic_bp="hyperte
 L_NO_PROXY = sorted(set(L_PANEL) - set(L_PROXIES))   # Tier B is the ceiling for these
 L_UKB_SOURCES = ("genebass", "azphewas", "astrazeneca", "regeneron", "rgc", "ukb", "uk_biobank")
 L_VERDICTS = set(["PASS", "LEAD", "KILL"])           # Amendment 1; PROVISIONAL retired
+# Amendment 1 clarifications C1-C4 (experiments.md, written before any gene-level result was opened)
+L_MIN_TRADEOFFS_SCREENED = 5                          # C1: Tier A needs >= 5 of 9 trade-off outcomes screened
+L_QUALIFYING_DOMAINS = set(["cognitive", "physical"])  # C2: SBP counts as physical; LDL, BMI, lifespan do not
+L_LIPID_GENES = set("""PCSK9 ANGPTL3 ANGPTL4 ANGPTL8 APOC3 APOA5 APOB APOE LDLR LDLRAP1 LPL LPA CETP LIPC MTTP
+NPC1L1 ABCG5 ABCG8 HMGCR SORT1 LIPG GPIHBP1 LMF1 ANGPTL1""".split())   # C3: frozen at commit 4073b89
+L_DISCOVERY_P_ACCEPTED = 1.9e-7                       # C4: accepted as implemented (not 1.923e-7)
+L_INDEP_TOKENS = ("finngen", "all_of_us", "allofus", "synthetic_replication")   # C4 allow list (+ fixture token)
 
 
 # Tier letters (ledger):
@@ -77,7 +84,10 @@ def oracle_replicates(beta, p_two_sided, benefit):
 
 
 def oracle_adverse(beta, p, adverse_sign=+1):
-    return p < L_ADVERSE_P and beta * adverse_sign > 0
+    """C4: the trade-off screen is one-sided in the harmful direction, alpha/9."""
+    if beta * adverse_sign <= 0:
+        return False
+    return (p / 2.0) < L_ADVERSE_P
 
 
 # ======================================================================================
@@ -120,8 +130,9 @@ def test_config_discovery_threshold(cfg_yaml):
     assert d["n_genes"] == L_N_GENES
     assert d["n_traits"] == L_N_TARGET
     thr = d["p_threshold"]
-    # both numbers printed in the ledger are acceptable: 1.9e-7 and 0.05/(20000*13)
-    assert L_DISCOVERY_P_PRINTED <= thr <= L_DISCOVERY_P * (1 + 1e-9), thr
+    # C4 accepts 1.9e-7 (the value printed in the ledger), which is stricter than 0.05/(20000*13) = 1.923e-7
+    assert thr == L_DISCOVERY_P_ACCEPTED, thr
+    assert thr <= L_DISCOVERY_P
 
 
 def test_config_replication_rule(cfg_yaml):
@@ -134,6 +145,18 @@ def test_config_replication_rule(cfg_yaml):
 
 def test_config_adverse_threshold(cfg_yaml):
     assert cfg_yaml["tradeoff_screen"]["alpha"] == L_ALPHA  # divided by N_tradeoff = 9 in code
+    assert cfg_yaml["tradeoff_screen"]["min_tradeoffs_screened"] == L_MIN_TRADEOFFS_SCREENED   # C1
+
+
+def test_config_replication_source_allow_and_deny_lists(cfg_yaml):
+    r = cfg_yaml["replication"]
+    allow = [t.lower() for t in r["independent_sources"]]
+    deny = [t.lower() for t in r["ukb_overlapping_sources"]]
+    assert "finngen" in allow and "all_of_us" in allow                       # C4
+    for tok in ("genebass", "azphewas", "astrazeneca", "regeneron", "ukb", "uk_biobank"):
+        assert tok in deny, tok
+    for a in allow:
+        assert not any(d in a for d in deny), "allow token %r contains a UKB token" % a
 
 
 def test_config_controls(cfg_yaml):
@@ -162,7 +185,8 @@ def test_config_verdict_domains_and_lipid_genes(cfg_yaml):
     v = cfg_yaml["verdict"]
     assert set(v["qualifying_domains"]) == set(["cognitive", "physical"])
     lipid = set(g.upper() for g in v["lipid_pathway_genes"])
-    assert set(["PCSK9", "ANGPTL4", "APOC3"]) <= lipid
+    assert lipid == L_LIPID_GENES, lipid ^ L_LIPID_GENES        # C3: frozen list
+    assert len(v["lipid_pathway_genes"]) == len(lipid), "duplicate entries"
 
 
 def test_config_loads_via_schema_and_derives_thresholds():
@@ -170,7 +194,8 @@ def test_config_loads_via_schema_and_derives_thresholds():
     c = load_config(CONFIG_PATH)
     assert len(c.panel) == 13 and len(c.tradeoff) == 9
     assert math.isclose(c.tradeoff_p, L_ADVERSE_P, rel_tol=1e-12)
-    assert L_DISCOVERY_P_PRINTED <= c.discovery_p <= L_DISCOVERY_P * (1 + 1e-9)
+    assert c.discovery_p == L_DISCOVERY_P_ACCEPTED
+    assert c.min_tradeoffs_screened == L_MIN_TRADEOFFS_SCREENED
     assert c.replication_p == L_REPL_ONE_SIDED_P
     assert c.lambda_gc_max == L_LAMBDA_GC_MAX
     assert c.syn_hits_max == 0
@@ -381,15 +406,6 @@ def test_adverse_and_failed_replication_is_not_silently_A_or_B(cfg):
     rows.append(R("GA", "coronary_disease", "plof", "discovery", +0.8, 1e-4))
     rows.append(R("GA", "hypertension", "plof", "replication", bad("hypertension"), 0.5))
     assert tier_map(rows, cfg)[("GA", "systolic_bp")] in ("C", "D")   # ledger silent on C vs D
-
-
-@pytest.mark.xfail(strict=False, reason="ledger silent: a gene with 0 of 9 trade-offs screened is reported "
-                                          "Tier A (see reviews/review-1.md)")
-def test_tier_A_requires_tradeoff_panel_to_have_been_screened(cfg):
-    rows = hit_rows("GA", "systolic_bp")
-    rows.append(R("GA", "hypertension", "plof", "replication", good("hypertension"), 0.01))
-    assert tier_map(rows, cfg)[("GA", "systolic_bp")] != "A"
-
 
 # ---------------- tier definitions ----------------
 def test_tier_definitions_all_four_letters(cfg):
@@ -603,6 +619,12 @@ def is_ukb_source(src):
     return any(tok in s for tok in L_UKB_SOURCES)
 
 
+def is_independent_source(src):
+    """C4: allow-listed (finngen, all_of_us) and no UK Biobank token."""
+    s = str(src).lower()
+    return any(tok in s for tok in L_INDEP_TOKENS) and not is_ukb_source(s)
+
+
 def oracle(df):
     """Independent re-implementation of the ledger + Amendment 1 on a normalized table.
 
@@ -614,13 +636,17 @@ def oracle(df):
         if r.trait in L_PANEL and oracle_discovery(r.beta, r.p, L_PANEL[r.trait][1]):
             hits.append((r.gene, r.trait))
     rep = df.query("cohort == 'replication' and mask == 'plof'")
-    rep = rep[[not is_ukb_source(s) for s in rep["source"]]]
+    rep = rep[[is_independent_source(s) for s in rep["source"]]]
     repd = dict(((r.gene, r.trait), r) for r in rep.itertuples())
     adverse_genes = set()
     tox = df.query("mask == 'plof' and cohort in ['discovery', 'replication']")
     for r in tox.itertuples():
         if r.trait in L_TRADEOFF and oracle_adverse(r.beta, r.p):
             adverse_genes.add(r.gene)
+    screened = dict()
+    for r in tox.itertuples():
+        if r.trait in L_TRADEOFF:
+            screened.setdefault(r.gene, set()).add(r.trait)
     tiers = dict()
     for g, t in hits:
         if g in adverse_genes:
@@ -637,7 +663,7 @@ def oracle(df):
         if row is None:
             tiers[(g, t)] = "B"
         elif oracle_replicates(row.beta, row.p, benefit_sign(row.trait)):
-            tiers[(g, t)] = "A"
+            tiers[(g, t)] = "A" if len(screened.get(g, ())) >= L_MIN_TRADEOFFS_SCREENED else "B"   # C1
         else:
             tiers[(g, t)] = "D"
     # controls
@@ -996,14 +1022,14 @@ def _fuzz_table(seed, n_genes=60):
     panel = sorted(L_PANEL)
     proxies_of = L_PROXIES
     indep = ["finngen_r13", "all_of_us_aba", "FinnGen_R12"]
-    ukb = ["genebass", "azphewas_v1", "regeneron_rgc", "UKB_lookup", "opentargets"]
+    ukb = ["genebass", "azphewas_v1", "regeneron_rgc", "UKB_lookup", "opentargets", "mystery_biobank"]
     rows = []
     for i in range(n_genes):
         g = "F%03d" % i
         for t in rng.choice(panel, size=int(rng.integers(1, 4)), replace=False):
             sgn = 1 if rng.random() < 0.7 else -1
             p = float(10 ** rng.uniform(-9, -6))                  # straddles 1.9e-7
-            while 1.89e-7 <= p <= 1.93e-7:                          # ledger prints 1.9e-7, formula gives 1.923e-7
+            while 1.89e-7 <= p <= 1.93e-7:                          # C4: 1.9e-7 accepted; formula gives 1.923e-7
                 p = float(10 ** rng.uniform(-9, -6))
             rows.append(R(g, t, "plof", "discovery", sgn * benefit_sign(t) * 0.3, p))
             rows.append(R(g, t, "dmis", "discovery", float(rng.normal()), 0.4))
@@ -1017,8 +1043,6 @@ def _fuzz_table(seed, n_genes=60):
             for cohort in ("discovery", "replication"):
                 if rng.random() < 0.6:
                     p3 = float(10 ** rng.uniform(-6, 0))
-                    while 0.0053 <= p3 <= 0.0115:              # one-sided vs two-sided reading differs here
-                        p3 = float(10 ** rng.uniform(-6, 0))
                     rows.append(R(g, out, "plof", cohort, float(rng.normal()), p3))
     return T(rows)
 
@@ -1044,23 +1068,6 @@ def test_negative_control_must_cover_the_discovery_universe(cfg):
     c = controls.run_controls(T(rows), cfg)
     assert c["valid"] is False
 
-
-@pytest.mark.xfail(strict=False, reason="R-4: PCSK9 coronary control is direction-only; passes at p=0.99")
-def test_pcsk9_coronary_control_cannot_pass_on_noise(null_table, cfg):
-    df = set_row(null_table, "PCSK9", "coronary_disease", "plof", "discovery", beta=good("coronary_disease", 0.01), p=0.99)
-    assert run_ctrl(df, cfg)["valid"] is False
-
-
-@pytest.mark.xfail(strict=False, reason="R-5: Confirmation clause (b) EUR-only not enforced; PASS reported plain")
-def test_pass_with_failed_eur_only_reanalysis_is_not_plain_pass(base_frames, tmp_path):
-    def edit(df):
-        setrow(df, "SYNPASS1", "systolic_bp", "plof", "discovery_eur", beta=0.0, p=0.9)
-    res, _ = mutated_run(base_frames["pass"], edit, tmp_path)
-    assert result_tiers(res)[("SYNPASS1", "systolic_bp")] == "A"
-    v = res["verdict"]
-    assert v["verdict"] != "PASS" or "eur" in json.dumps(v).lower()
-
-
 @pytest.mark.xfail(strict=False, reason="R-3: any --config is accepted; verdict not tied to the preregistered constants")
 def test_edited_config_cannot_silently_produce_a_verdict(synth, tmp_path):
     text = CONFIG_PATH.read_text().replace("syn_hits_max: 0", "syn_hits_max: 3")
@@ -1075,3 +1082,140 @@ def test_edited_config_cannot_silently_produce_a_verdict(synth, tmp_path):
     except Exception:
         return
     assert res["verdict"]["verdict"] == "KILL" or res.get("config_matches_ledger") is False
+
+
+# ======================================================================================
+# (d) Amendment 1 clarifications C1-C4
+# ======================================================================================
+def sbp_gene_with_screen(gene, disc_outcomes, rep_outcomes=()):
+    """SBP hit replicated via hypertension; only the listed trade-off outcomes have plof rows."""
+    rows = hit_rows(gene, "systolic_bp")
+    rows.append(R(gene, "hypertension", "plof", "replication", good("hypertension"), 0.01))
+    for t in disc_outcomes:
+        rows.append(R(gene, t, "plof", "discovery", 0.01, 0.5))
+    for t in rep_outcomes:
+        rows.append(R(gene, t, "plof", "replication", 0.01, 0.5))
+    return rows
+
+
+@pytest.mark.parametrize("n,letter", [(0, "B"), (1, "B"), (4, "B"), (5, "A"), (6, "A"), (9, "A")])
+def test_c1_tier_A_needs_at_least_five_tradeoffs_screened(n, letter, cfg):
+    rows = sbp_gene_with_screen("GA", L_TRADEOFF[:n])
+    assert L_MIN_TRADEOFFS_SCREENED == 5
+    assert tier_map(rows, cfg)[("GA", "systolic_bp")] == letter
+
+
+def test_c1_screening_is_the_union_of_outcomes_across_cohorts(cfg):
+    union = sbp_gene_with_screen("GA", L_TRADEOFF[:3], L_TRADEOFF[3:5])      # 5 distinct outcomes
+    assert tier_map(union, cfg)[("GA", "systolic_bp")] == "A"
+    same = sbp_gene_with_screen("GB", L_TRADEOFF[:3], L_TRADEOFF[:3])        # 3 distinct outcomes, twice
+    assert tier_map(same, cfg)[("GB", "systolic_bp")] == "B"
+
+
+def test_c1_only_plof_rows_count_as_screened(cfg):
+    rows = sbp_gene_with_screen("GA", L_TRADEOFF[:4])
+    rows.append(R("GA", L_TRADEOFF[4], "dmis", "discovery", 0.01, 0.5))       # not the plof mask
+    rows.append(R("GA", L_TRADEOFF[5], "syn", "discovery", 0.01, 0.5))
+    assert tier_map(rows, cfg)[("GA", "systolic_bp")] == "B"
+
+
+def test_c1_unscreened_would_be_A_is_flagged_and_adverse_still_wins(cfg):
+    hits = tiering.build_hits(T(sbp_gene_with_screen("GA", L_TRADEOFF[:4])), cfg)
+    assert list(hits["tier"]) == ["B"] and bool(hits["tradeoff_unscreened"].iloc[0]) is True
+    rows = sbp_gene_with_screen("GB", L_TRADEOFF[1:4])
+    rows.append(R("GB", L_TRADEOFF[0], "plof", "discovery", 0.9, 1e-5))      # harmful and significant
+    assert tier_map(rows, cfg)[("GB", "systolic_bp")] == "C"
+
+
+def test_c1_end_to_end_unscreened_gene_cannot_give_pass(base_frames, tmp_path):
+    def edit(df):
+        keep = L_TRADEOFF[:4]
+        sel = (df["gene"] == "SYNPASS1") & df["trait"].isin(L_TRADEOFF) & (~df["trait"].isin(keep))
+        df.drop(df.index[sel], inplace=True)
+    res, df = mutated_run(base_frames["pass"], edit, tmp_path)
+    assert result_tiers(res)[("SYNPASS1", "systolic_bp")] == "B"
+    assert res["verdict"]["verdict"] == "LEAD" and res["verdict"]["pass_genes"] == []
+    _, tiers, o_verdict = oracle(df)
+    assert tiers[("SYNPASS1", "systolic_bp")] == "B" and o_verdict == "LEAD"
+
+
+# ---------------- C2: only cognitive/physical traits qualify; PASS is reachable only through SBP ----------------
+def qualifies_for(trait, cfg):
+    rows = hit_rows("GA", trait) + null_tradeoffs("GA")
+    if trait in L_PROXIES:
+        px = L_PROXIES[trait]
+        rows.append(R("GA", px, "plof", "replication", good(px), 0.01))
+    hits = tiering.build_hits(T(rows), cfg)
+    assert len(hits) == 1
+    return bool(hits["qualifies"].iloc[0]), hits["tier"].iloc[0]
+
+
+@pytest.mark.parametrize("trait", sorted(L_PANEL))
+def test_c2_qualifying_domains(trait, cfg):
+    q, tier = qualifies_for(trait, cfg)
+    assert q == (L_PANEL[trait][0] in L_QUALIFYING_DOMAINS), trait
+    assert tier == ("A" if trait in L_PROXIES else "B")
+
+
+def test_c2_replicated_ldl_or_bmi_gene_cannot_give_pass(base_frames, tmp_path):
+    for trait, px in (("bmi", "obesity"), ("ldl", "hypercholesterolemia")):
+        def edit(df, trait=trait, px=px):
+            setrow(df, "SYNPASS1", "systolic_bp", "plof", "discovery", z=zbad("systolic_bp", 1))   # remove SBP hit
+            setrow(df, "SYNPASS1", trait, "plof", "discovery", z=zgood(trait, 9))
+            setrow(df, "SYNPASS1", trait, "dmis", "discovery", z=zgood(trait, 2))
+            setrow(df, "SYNPASS1", px, "plof", "replication", z=zgood(px, 4))
+        sub = tmp_path / trait
+        sub.mkdir()
+        res, df = mutated_run(base_frames["pass"], edit, sub)
+        assert result_tiers(res)[("SYNPASS1", trait)] == "A"
+        assert res["verdict"]["pass_genes"] == [] and res["verdict"]["verdict"] == "LEAD"    # SYNLEAD1 only
+
+
+# ---------------- C4: accepted behaviours ----------------
+@pytest.mark.parametrize("p2,adverse", [(0.004, True), (0.008, True), (0.0109, True), (0.0113, False), (0.05, False)])
+def test_c4_tradeoff_screen_is_one_sided(p2, adverse, cfg):
+    assert oracle_adverse(+0.8, p2) == adverse
+    rows = drop_rows(sbp_replicated_gene(), "GA", "coronary_disease", "discovery")
+    rows.append(R("GA", "coronary_disease", "plof", "discovery", +0.8, p2))
+    assert tier_map(rows, cfg)[("GA", "systolic_bp")] == ("C" if adverse else "A")
+
+
+def test_c4_gene_untested_in_replication_is_tier_B_not_D(cfg):
+    rows = hit_rows("GA", "systolic_bp") + null_tradeoffs("GA", cohorts=("discovery",))
+    rows.append(R("OTHER", "hypertension", "plof", "replication", good("hypertension"), 0.01))   # trait present, gene absent
+    hits = tiering.build_hits(T(rows), cfg)
+    assert list(hits["tier"]) == ["B"] and list(hits["rep_status"]) == ["gene_untested"]
+
+
+def test_c4_control_that_cannot_run_gives_kill_controls_not_evaluable(base_frames, tmp_path):
+    def edit(df):
+        df.drop(df.index[df["mask"] == "syn"], inplace=True)
+    res, _ = mutated_run(base_frames["pass"], edit, tmp_path)
+    assert res["verdict"]["verdict"] == "KILL"
+    assert res["verdict"]["reason"].startswith("controls_not_evaluable")
+    assert res["controls"]["valid"] is False
+
+
+def test_c4_eur_only_is_reported_but_does_not_gate(base_frames, tmp_path):
+    def edit(df):
+        setrow(df, "SYNPASS1", "systolic_bp", "plof", "discovery_eur", beta=0.0, p=0.9)
+    res, _ = mutated_run(base_frames["pass"], edit, tmp_path)
+    row = [r for r in res["tiers"]["A"] if r["gene"] == "SYNPASS1"][0]
+    assert row["eur_status"] == "failed"
+    assert res["verdict"]["verdict"] == "PASS"
+
+
+def test_c4_pcsk9_coronary_control_is_direction_only(null_table, cfg):
+    df = set_row(null_table, "PCSK9", "coronary_disease", "plof", "discovery", beta=good("coronary_disease", 0.01), p=0.99)
+    assert run_ctrl(df, cfg)["valid"] is True
+    df = set_row(null_table, "PCSK9", "coronary_disease", "plof", "discovery", beta=bad("coronary_disease", 0.01), p=0.99)
+    assert run_ctrl(df, cfg)["valid"] is False
+
+
+def test_c4_unknown_replication_source_is_excluded_and_listed(base_frames, tmp_path):
+    def edit(df):
+        sel = df["cohort"] == "replication"
+        df.loc[sel, "source"] = "mystery_biobank_burden"
+    res, _ = mutated_run(base_frames["pass"], edit, tmp_path)
+    assert res["verdict"]["verdict"] == "LEAD"
+    assert "mystery_biobank_burden" in res["data"]["replication_sources_excluded"]
