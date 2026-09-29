@@ -144,3 +144,13 @@ Data in hand: Genebass discovery via the open REST API (CC BY 4.0), FinnGen R13 
 - Disclosure: while debugging the file format, builder-data printed two FinnGen rows (LDLR and DHPS, hypercholesterolemia). No rule was set from them; LDLR is not one of the positive-control genes (PCSK9, ANGPTL4, APOC3).
 
 - C9 (from builder-pipeline's judgment call, decided by the lead before any real-data run): the C1 rule applies to LEAD as well. A Tier B gene counts toward LEAD only if at least 5 of the 9 trade-off outcomes were screened for it; otherwise it is listed as "Tier B, trade-off unscreened" and does not count. Reason: LEAD asserts "no adverse trade-off", which is vacuous with no screening.
+
+### 2026-09-29 Amendment 1 review clarifications C10 (from reviews/review-1.md, decided by the lead before any real-data run)
+
+- C10a (R-1): The synonymous negative control is valid only if the synonymous rows cover at least 90 percent of the (gene, trait) pairs that have a pLoF discovery row AND number at least 10,000. Otherwise status is controls_not_evaluable and the verdict is KILL.
+- C10b (R-2): Replication-sign control, from established biology, not from any table: in the replication cohort, PCSK9 pLoF for the hypercholesterolemia proxy must have a negative effect (lower risk), and LDLR pLoF a positive effect (higher risk). At least one of the two must be evaluable; every evaluable one must hold; otherwise KILL. The adapter must assert A1FREQ <= 0.5 for every kept FinnGen row (the LoF carrier allele is A1), and drop-and-log any row failing it. Disclosure: an LDLR row was among the two FinnGen rows printed earlier; this control's direction comes from biology (LDLR loss of function causes familial hypercholesterolemia), not from that row.
+- C10c (R-3): The run compares the config's sha256 with a pinned value; on mismatch the report and JSON stamp config_matches_ledger=false and the verdict is labeled NON-PREREGISTERED, and the CLI exits nonzero. The pinned hash changes only with a dated ledger entry.
+- C10d (R-9): Rows with p = 1 or beta = 0 are retained for lambda_GC and hit counting (which use p only); se stays undefined for them.
+- C10e (R-7): Informational only, no gating: the report adds, per Tier A/B gene, any significant (discovery threshold) harmful-direction association on the other panel traits.
+- C10f (R-8): Any PASS or LEAD report prints the C5 (missense|LC) and C7 (cognitive coverage limited to fluid intelligence and reaction time) caveats.
+- C10g (R-6, R-4, R-10): screening counts use only allow-listed replication rows; requests and pyarrow are declared in pyproject; positive controls are evaluated through the pipeline's own tier path.
