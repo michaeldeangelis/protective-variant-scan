@@ -2,7 +2,7 @@
 """Fetch Genebass gene-based burden results via the open API behind app.genebass.org and write <data>/burden_genebass.csv.gz.
 
 No login, no billing project (the Hail tables in gs://ukbb-exome-public are requester-pays and are not used).
-One request at a time with a delay: ~19 analyses x 3 burden sets, cached under <data>/raw/genebass/.
+One request at a time with a delay: 20 analyses x 3 burden sets, cached under <data>/raw/genebass/.
 """
 import argparse
 import json
