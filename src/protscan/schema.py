@@ -29,6 +29,7 @@ class Config:
     independent_sources: tuple  # source-name tokens accepted as independent of UK Biobank
     ukb_sources: tuple     # source-name tokens that mark a row as UK Biobank (overrides the allow list)
     tradeoff_p: float
+    min_tradeoffs_screened: int
     lambda_gc_max: float
     syn_hits_max: int
     positive_controls: tuple
@@ -89,6 +90,9 @@ def load_config(path) -> Config:
     for c in pos:
         if c["trait"] not in known:
             raise ValueError(f"positive control {c['id']}: unknown trait {c['trait']}")
+    min_screened = int(y["tradeoff_screen"]["min_tradeoffs_screened"])
+    if not 1 <= min_screened <= len(tradeoff_sign):
+        raise ValueError("tradeoff_screen.min_tradeoffs_screened must be between 1 and N_tradeoff")
     q = tuple(y["verdict"]["qualifying_domains"])
     if not set(q) <= set(DOMAINS):
         raise ValueError("verdict.qualifying_domains invalid")
@@ -106,6 +110,7 @@ def load_config(path) -> Config:
         independent_sources=tuple(t.lower() for t in y["replication"]["independent_sources"]),
         ukb_sources=tuple(t.lower() for t in y["replication"]["ukb_overlapping_sources"]),
         tradeoff_p=float(y["tradeoff_screen"]["alpha"]) / len(tradeoff_sign),
+        min_tradeoffs_screened=min_screened,
         lambda_gc_max=float(y["controls"]["lambda_gc_max"]),
         syn_hits_max=int(y["controls"]["syn_hits_max"]),
         positive_controls=pos,

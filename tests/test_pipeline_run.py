@@ -211,3 +211,14 @@ def test_json_and_report_contents(make):
                    "### Tier A", "### Tier B", "### Tier C", "### Tier D"):
         assert needle in md, needle
     assert j == json.loads(json.dumps(j))
+
+
+def test_unscreened_scenario_caps_replicated_gene_at_tier_B(make):
+    d = make("unscreened")
+    r = run(d)
+    b = [x for x in r["tiers"]["B"] if x["gene"] == "SYNPASS1"]
+    assert b and b[0]["tradeoff_unscreened"] and b[0]["n_tradeoff_tested"] == 4 and b[0]["rep_status"] == "replicated"
+    assert "SYNPASS1" not in genes(r, "A")
+    assert r["verdict"]["verdict"] == "LEAD" and r["verdict"]["lead_genes"] == ["SYNPASS1"]
+    assert r["thresholds"]["min_tradeoffs_screened"] == 5
+    assert "trade-off unscreened" in (Path(d) / "out" / "report.md").read_text()
