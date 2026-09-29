@@ -410,3 +410,542 @@ def test_tier_definitions_all_four_letters(cfg):
 def test_synonymous_only_gene_never_receives_a_tier(cfg):
     rows = [R("SYNGENE", "systolic_bp", "syn", "discovery", good("systolic_bp"), 1e-15)]
     assert len(tiering.build_hits(T(rows), cfg)) == 0
+
+
+# ---------------- controls (unit level) ----------------
+CHI2_MEDIAN = float(chi2.ppf(0.5, 1))
+
+
+def baseline_null(n_genes=150, seed=7):
+    """Null discovery table (plof/dmis/syn, N(0,1) z-scores) plus the lipid positive controls."""
+    rng = np.random.default_rng(seed)
+    genes = ["NULLG%04d" % i for i in range(n_genes)]
+    traits = sorted(L_PANEL) + list(L_TRADEOFF) + list(CTRL_TRAITS)
+    rows = []
+    for g in genes:
+        for t in traits:
+            for m in ("plof", "dmis", "syn"):
+                z = float(rng.standard_normal())
+                rows.append(R(g, t, m, "discovery", z * 0.1, float(2 * norm.sf(abs(z)))))
+    rows.append(R("PCSK9", "ldl", "plof", "discovery", good("ldl"), 1e-30))
+    rows.append(R("PCSK9", "coronary_disease", "plof", "discovery", good("coronary_disease"), 1e-6))
+    rows.append(R("ANGPTL4", "triglycerides", "plof", "discovery", good("triglycerides"), 1e-20))
+    rows.append(R("APOC3", "triglycerides", "plof", "discovery", good("triglycerides"), 1e-20))
+    return pd.DataFrame(rows, columns=COLUMNS)
+
+
+@pytest.fixture(scope="module")
+def null_table():
+    return baseline_null()
+
+
+def set_row(df, gene, trait, mask, cohort, beta=None, p=None):
+    df = df.copy()
+    sel = (df["gene"] == gene) & (df["trait"] == trait) & (df["mask"] == mask) & (df["cohort"] == cohort)
+    assert sel.sum() == 1, (gene, trait, mask, cohort)
+    if beta is not None:
+        df.loc[sel, "beta"] = beta
+    if p is not None:
+        df.loc[sel, "p"] = p
+    return df
+
+
+def drop_gene(df, gene):
+    return df[df["gene"] != gene].copy()
+
+
+def run_ctrl(df, cfg):
+    return controls.run_controls(validate(df), cfg)
+
+
+def test_controls_valid_on_clean_null_table(null_table, cfg):
+    c = run_ctrl(null_table, cfg)
+    assert c["negative_synonymous"]["lambda_gc"] < L_LAMBDA_GC_MAX
+    assert c["negative_synonymous"]["n_syn_hit_genes"] == 0
+    assert c["valid"] is True and c["failed"] == [] and c["not_run"] == []
+
+
+def test_pcsk9_ldl_wrong_direction_fails(null_table, cfg):
+    df = set_row(null_table, "PCSK9", "ldl", "plof", "discovery", beta=bad("ldl"), p=1e-30)
+    c = run_ctrl(df, cfg)
+    assert c["valid"] is False and c["failed"]
+
+
+def test_pcsk9_ldl_beneficial_but_below_discovery_threshold_fails(null_table, cfg):
+    df = set_row(null_table, "PCSK9", "ldl", "plof", "discovery", p=1e-5)
+    c = run_ctrl(df, cfg)
+    assert c["valid"] is False and c["failed"]
+
+
+def test_pcsk9_missing_makes_controls_invalid(null_table, cfg):
+    c = run_ctrl(drop_gene(null_table, "PCSK9"), cfg)
+    assert c["valid"] is False
+
+
+def test_pcsk9_coronary_wrong_direction_fails(null_table, cfg):
+    df = set_row(null_table, "PCSK9", "coronary_disease", "plof", "discovery", beta=bad("coronary_disease"))
+    c = run_ctrl(df, cfg)
+    assert c["valid"] is False and c["failed"]
+
+
+def test_lipid_control_needs_one_of_angptl4_or_apoc3(null_table, cfg):
+    one_bad = set_row(null_table, "ANGPTL4", "triglycerides", "plof", "discovery", beta=bad("triglycerides"))
+    assert run_ctrl(one_bad, cfg)["valid"] is True            # APOC3 still recovered
+    both_bad = set_row(one_bad, "APOC3", "triglycerides", "plof", "discovery", beta=bad("triglycerides"))
+    c = run_ctrl(both_bad, cfg)
+    assert c["valid"] is False and c["failed"]
+    weak = set_row(set_row(null_table, "ANGPTL4", "triglycerides", "plof", "discovery", p=1e-4),
+                   "APOC3", "triglycerides", "plof", "discovery", p=1e-4)
+    assert run_ctrl(weak, cfg)["valid"] is False              # beneficial but not at discovery threshold
+
+
+def flat_syn_lambda(df, lam):
+    """Set every synonymous p to the value whose chi2 statistic is lam x median(chi2_1): lambda_GC == lam."""
+    df = df.copy()
+    sel = df["mask"] == "syn"
+    df.loc[sel, "p"] = float(chi2.sf(lam * CHI2_MEDIAN, 1))
+    df.loc[sel, "beta"] = 0.0
+    return df
+
+
+def test_lambda_gc_boundary(null_table, cfg):
+    ok = run_ctrl(flat_syn_lambda(null_table, 1.099), cfg)
+    assert ok["negative_synonymous"]["lambda_ok"] is True and ok["valid"] is True
+    bad_ = run_ctrl(flat_syn_lambda(null_table, 1.101), cfg)
+    assert bad_["negative_synonymous"]["lambda_ok"] is False
+    assert bad_["valid"] is False and "negative_synonymous" in bad_["failed"]
+
+
+def test_synonymous_hit_in_beneficial_direction_fails_control(null_table, cfg):
+    df = set_row(null_table, "NULLG0001", "hand_grip_strength", "syn", "discovery",
+                 beta=good("hand_grip_strength"), p=1e-9)
+    c = run_ctrl(df, cfg)
+    assert c["negative_synonymous"]["n_syn_hit_genes"] == 1
+    assert c["valid"] is False and "negative_synonymous" in c["failed"]
+
+
+def test_synonymous_hit_in_harmful_direction_is_not_counted(null_table, cfg):
+    df = set_row(null_table, "NULLG0001", "hand_grip_strength", "syn", "discovery",
+                 beta=bad("hand_grip_strength"), p=1e-9)
+    c = run_ctrl(df, cfg)
+    assert c["negative_synonymous"]["n_syn_hit_genes"] == 0
+
+
+# ---------------- UKB-overlap: name variants a substring denylist can miss ----------------
+UKB_NAME_VARIANTS = ["uk-biobank", "az_phewas", "opentargets_gene_burden", "backman_2021_exomes",
+                     "UK Biobank 450k exomes", "pan_ukb_burden"]
+
+
+@pytest.mark.parametrize("src", UKB_NAME_VARIANTS)
+def test_ukb_derived_source_name_variants_cannot_yield_tier_A(src, cfg):
+    """Ledger: Genebass, AZ and Regeneron/Open Targets are all UKB exomes; none may count as replication."""
+    rows = hit_rows("GA", "systolic_bp") + null_tradeoffs("GA", cohorts=("discovery",))
+    rows.append(R("GA", "hypertension", "plof", "replication", good("hypertension"), 1e-12, source=src))
+    assert tier_map(rows, cfg)[("GA", "systolic_bp")] != "A", "source %r counted as independent" % src
+
+
+@pytest.mark.parametrize("src", ["finngen_r13", "finngen_r12", "FinnGen_DF13", "all_of_us_aba", "synthetic_replication"])
+def test_independent_sources_can_still_yield_tier_A(src, cfg):
+    rows = hit_rows("GA", "systolic_bp") + null_tradeoffs("GA", cohorts=("discovery",))
+    rows.append(R("GA", "hypertension", "plof", "replication", good("hypertension"), 0.01, source=src))
+    assert tier_map(rows, cfg)[("GA", "systolic_bp")] == "A"
+
+
+# ======================================================================================
+# (c) end to end: synthetic fixtures -> python -m protscan run -> independent oracle
+# ======================================================================================
+import gzip
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+
+MIN_LIPID = set(["PCSK9", "ANGPTL4", "APOC3", "APOB", "LDLR", "ANGPTL3", "LPL", "LPA"])
+N_GENES = 400
+
+
+def _load_synth():
+    spec = importlib.util.spec_from_file_location("make_synthetic_for_conformance", ROOT / "scripts" / "make_synthetic.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.fixture(scope="module")
+def synth():
+    return _load_synth()
+
+
+def write_tables(tables, out_dir):
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for name, df in tables.items():
+        df.to_csv(out_dir / (name + ".csv.gz"), index=False)
+
+
+def run_cli(data_dir, out_json):
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(ROOT / "src")
+    proc = subprocess.run(
+        [sys.executable, "-m", "protscan", "run", "--config", str(CONFIG_PATH),
+         "--data", str(data_dir), "--out", str(out_json)],
+        capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=600)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    return json.loads(Path(out_json).read_text())
+
+
+def all_rows(tables):
+    return pd.concat(list(tables.values()), ignore_index=True)
+
+
+def is_ukb_source(src):
+    s = str(src).lower()
+    return any(tok in s for tok in L_UKB_SOURCES)
+
+
+def oracle(df):
+    """Independent re-implementation of the ledger + Amendment 1 on a normalized table.
+
+    Returns (controls_valid, tiers, verdict) where tiers maps (gene, trait) -> letter for discovery hits.
+    """
+    d = df.query("cohort == 'discovery' and mask == 'plof'")
+    hits = []
+    for r in d.itertuples():
+        if r.trait in L_PANEL and oracle_discovery(r.beta, r.p, L_PANEL[r.trait][1]):
+            hits.append((r.gene, r.trait))
+    rep = df.query("cohort == 'replication' and mask == 'plof'")
+    rep = rep[[not is_ukb_source(s) for s in rep["source"]]]
+    repd = dict(((r.gene, r.trait), r) for r in rep.itertuples())
+    adverse_genes = set()
+    tox = df.query("mask == 'plof' and cohort in ['discovery', 'replication']")
+    for r in tox.itertuples():
+        if r.trait in L_TRADEOFF and oracle_adverse(r.beta, r.p):
+            adverse_genes.add(r.gene)
+    tiers = dict()
+    for g, t in hits:
+        if g in adverse_genes:
+            tiers[(g, t)] = "C"
+            continue
+        if t not in L_PROXIES:
+            tiers[(g, t)] = "B"
+            continue
+        row = None
+        for cand in (t, L_PROXIES[t]):
+            if (g, cand) in repd:
+                row = repd[(g, cand)]
+                break
+        if row is None:
+            tiers[(g, t)] = "B"
+        elif oracle_replicates(row.beta, row.p, benefit_sign(row.trait)):
+            tiers[(g, t)] = "A"
+        else:
+            tiers[(g, t)] = "D"
+    # controls
+    syn = df.query("cohort == 'discovery' and mask == 'syn'")
+    lam = float(np.median(chi2.isf(np.clip(syn["p"].to_numpy(), 1e-300, 1.0), 1)) / CHI2_MEDIAN)
+    syn_hits = [r for r in syn.itertuples() if r.trait in L_PANEL and oracle_discovery(r.beta, r.p, L_PANEL[r.trait][1])]
+
+    def rowof(g, t):
+        x = d[(d["gene"] == g) & (d["trait"] == t)]
+        return x.iloc[0] if len(x) else None
+
+    ok = lam < L_LAMBDA_GC_MAX and len(syn_hits) == 0
+    x = rowof("PCSK9", "ldl")
+    ok = ok and x is not None and oracle_discovery(x.beta, x.p, -1)
+    x = rowof("PCSK9", "coronary_disease")
+    ok = ok and x is not None and x.beta < 0
+    tg = [rowof(g, "triglycerides") for g in ("ANGPTL4", "APOC3")]
+    ok = ok and any(y is not None and y.beta < 0 and y.p < L_DISCOVERY_P for y in tg)
+    # verdict
+    dm = df.query("cohort == 'discovery' and mask == 'dmis'")
+    dmd = dict(((r.gene, r.trait), r.beta) for r in dm.itertuples())
+    qual = []
+    for (g, t), letter in tiers.items():
+        if g in MIN_LIPID or L_PANEL[t][0] not in ("cognitive", "physical"):
+            continue
+        if (g, t) in dmd and oracle_beneficial(dmd[(g, t)], L_PANEL[t][1]):
+            qual.append(letter)
+    if not ok:
+        verdict = "KILL"
+    elif "A" in qual:
+        verdict = "PASS"
+    elif "B" in qual:
+        verdict = "LEAD"
+    else:
+        verdict = "KILL"
+    return ok, tiers, verdict
+
+
+def result_tiers(res):
+    out = dict()
+    for letter in "ABCD":
+        for r in res["tiers"][letter]:
+            out[(r["gene"], r["trait"])] = letter
+    return out
+
+
+
+
+@pytest.fixture(scope="module")
+def scenario_runs(synth, tmp_path_factory):
+    """Each synthetic scenario written to disk and run through the real CLI once."""
+    runs = dict()
+    for name in ("pass", "lead", "nolead", "broken_positive", "broken_lambda", "broken_syn_hit"):
+        d = tmp_path_factory.mktemp("scn_" + name)
+        tables = synth.make_synthetic(name, n_genes=N_GENES)
+        write_tables(tables, d)
+        res = run_cli(d, d / "out" / "protective-scan.json")
+        runs[name] = (tables, res, d)
+    return runs
+
+
+@pytest.mark.parametrize("name,verdict", [("pass", "PASS"), ("lead", "LEAD"), ("nolead", "KILL"),
+                                          ("broken_positive", "KILL"), ("broken_lambda", "KILL"),
+                                          ("broken_syn_hit", "KILL")])
+def test_scenario_verdict_matches_ledger_rules(scenario_runs, name, verdict):
+    tables, res, _ = scenario_runs[name]
+    assert res["verdict"]["verdict"] == verdict
+    assert res["verdict"]["verdict"] in L_VERDICTS
+    ok, tiers, o_verdict = oracle(all_rows(tables))
+    assert o_verdict == verdict, "oracle and hand expectation disagree (test bug)"
+    assert res["controls"]["valid"] == bool(ok)
+    assert result_tiers(res) == tiers, "pipeline tiers differ from independent oracle"
+
+
+def test_results_json_and_report_contain_required_sections(scenario_runs):
+    _, res, d = scenario_runs["pass"]
+    for k in ("controls", "rungs", "tiers", "verdict"):
+        assert k in res
+    c = res["controls"]
+    assert "lambda_gc" in c["negative_synonymous"] and "n_syn_hit_genes" in c["negative_synonymous"]
+    assert len(c["positive"]) >= 3
+    assert set(res["rungs"]) == set(["trivial", "simplest", "incumbent", "candidate"])
+    assert set(res["tiers"]) == set("ABCD")
+    text = (d / "out" / "report.md").read_text()
+    for needle in ("Verdict", "lambda_GC", "Tier A", "Tier B", "Tier C", "Tier D", "trivial", "simplest",
+                   "incumbent", "candidate", "SYNTHETIC"):
+        assert needle in text, needle
+
+
+def test_trivial_rung_is_the_synonymous_mask(scenario_runs):
+    _, res, _ = scenario_runs["broken_syn_hit"]
+    assert res["rungs"]["trivial"]["n_genes"] == 1
+    assert res["controls"]["negative_synonymous"]["syn_hit_genes"] == ["SYNSYN1"]
+    _, res0, _ = scenario_runs["pass"]
+    assert res0["rungs"]["trivial"]["n_genes"] == 0
+
+
+def test_lead_is_never_reported_as_pass(scenario_runs):
+    _, res, d = scenario_runs["lead"]
+    v = res["verdict"]
+    assert v["verdict"] == "LEAD" and v["pass_genes"] == [] and v["lead_genes"] == ["SYNLEAD1"]
+    assert result_tiers(res)[("SYNLEAD1", "fluid_intelligence")] == "B"
+    text = (d / "out" / "report.md").read_text()
+    assert "## Verdict: LEAD" in text and "UNREPLICATED" in text
+    assert "## Verdict: PASS" not in text
+
+
+def test_pass_scenario_tiers_by_hand(scenario_runs):
+    _, res, _ = scenario_runs["pass"]
+    tm = result_tiers(res)
+    assert tm[("SYNPASS1", "systolic_bp")] == "A"
+    assert tm[("SYNLEAD1", "fluid_intelligence")] == "B"
+    assert tm[("SYNADV1", "systolic_bp")] == "C"
+    assert tm[("SYNFAIL1", "systolic_bp")] == "D"
+    assert tm[("SYNMASK1", "fev1")] == "B"
+    assert res["verdict"]["pass_genes"] == ["SYNPASS1"]      # SYNMASK1 excluded: dmis direction disagrees
+    assert "SYNMASK1" not in res["verdict"]["lead_genes"]
+    assert "PCSK9" not in res["verdict"]["pass_genes"]       # lipid-pathway gene, Tier A on LDL
+
+
+# ---------------- mutation tests: break one thing, check verdict and oracle agreement ----------------
+def setrow(df, gene, trait, mask, cohort, z=None, beta=None, p=None, source=None):
+    sel = (df["gene"] == gene) & (df["trait"] == trait) & (df["mask"] == mask) & (df["cohort"] == cohort)
+    assert sel.sum() == 1, (gene, trait, mask, cohort, int(sel.sum()))
+    i = df.index[sel][0]
+    if z is not None:
+        df.loc[i, "beta"] = z * df.loc[i, "se"]
+        df.loc[i, "p"] = float(2 * norm.sf(abs(z)))
+    if beta is not None:
+        df.loc[i, "beta"] = beta
+    if p is not None:
+        df.loc[i, "p"] = p
+    if source is not None:
+        df.loc[i, "source"] = source
+
+
+def zgood(trait, mag):
+    return benefit_sign(trait) * abs(mag)
+
+
+def zbad(trait, mag):
+    return -benefit_sign(trait) * abs(mag)
+
+
+@pytest.fixture(scope="module")
+def base_frames(synth):
+    return dict((n, all_rows(synth.make_synthetic(n, n_genes=N_GENES)).copy()) for n in ("pass", "lead"))
+
+
+def mutated_run(base, edit, tmp_path):
+    from protscan.run import run_pipeline
+    df = base.copy()
+    edit(df)
+    d = tmp_path / "data"
+    d.mkdir()
+    df.to_csv(d / "burden_mutated.csv.gz", index=False)
+    res = run_pipeline(CONFIG_PATH, d, tmp_path / "out" / "protective-scan.json")
+    return res, df
+
+
+def lam_flat(df, lam):
+    sel = df["mask"] == "syn"
+    df.loc[sel, "p"] = float(chi2.sf(lam * CHI2_MEDIAN, 1))
+    df.loc[sel, "beta"] = 0.0
+
+
+def edit_flip_pcsk9_ldl(df):
+    setrow(df, "PCSK9", "ldl", "plof", "discovery", z=zbad("ldl", 15))
+
+
+def edit_pcsk9_ldl_weak(df):
+    setrow(df, "PCSK9", "ldl", "plof", "discovery", p=1e-5)
+
+
+def edit_drop_tg_controls(df):
+    df.drop(df.index[df["gene"].isin(["ANGPTL4", "APOC3"])], inplace=True)
+
+
+def edit_flip_both_tg(df):
+    setrow(df, "ANGPTL4", "triglycerides", "plof", "discovery", z=zbad("triglycerides", 9))
+    setrow(df, "APOC3", "triglycerides", "plof", "discovery", z=zbad("triglycerides", 12))
+
+
+def edit_pcsk9_cad_flip(df):
+    setrow(df, "PCSK9", "coronary_disease", "plof", "discovery", z=zbad("coronary_disease", 4))
+
+
+def edit_lambda_high(df):
+    lam_flat(df, 1.101)
+
+
+def edit_syn_hit(df):
+    setrow(df, "SYNPASS1", "hand_grip_strength", "syn", "discovery", z=zgood("hand_grip_strength", 7))
+
+
+@pytest.mark.parametrize("edit", [edit_flip_pcsk9_ldl, edit_pcsk9_ldl_weak, edit_drop_tg_controls, edit_flip_both_tg,
+                                  edit_pcsk9_cad_flip, edit_lambda_high, edit_syn_hit],
+                         ids=lambda f: f.__name__)
+def test_breaking_any_control_yields_kill_even_with_tier_A_gene(edit, base_frames, tmp_path):
+    res, df = mutated_run(base_frames["pass"], edit, tmp_path)
+    assert res["controls"]["valid"] is False
+    assert res["verdict"]["verdict"] == "KILL", res["verdict"]
+    assert res["verdict"]["controls_valid"] is False
+    ok, tiers, o_verdict = oracle(df)
+    assert not ok and o_verdict == "KILL"
+    assert ("SYNPASS1", "systolic_bp") in result_tiers(res)     # a Tier-A style gene existed; KILL still wins
+    assert "PASS" != res["verdict"]["verdict"]
+
+
+def test_lambda_gc_just_below_limit_still_passes(base_frames, tmp_path):
+    res, df = mutated_run(base_frames["pass"], lambda x: lam_flat(x, 1.099), tmp_path)
+    assert res["controls"]["negative_synonymous"]["lambda_gc"] < L_LAMBDA_GC_MAX
+    assert res["verdict"]["verdict"] == "PASS"
+
+
+def test_synonymous_hit_harmful_direction_does_not_kill(base_frames, tmp_path):
+    def edit(df):
+        setrow(df, "SYNPASS1", "hand_grip_strength", "syn", "discovery", z=zbad("hand_grip_strength", 7))
+    res, _ = mutated_run(base_frames["pass"], edit, tmp_path)
+    assert res["controls"]["valid"] is True and res["verdict"]["verdict"] == "PASS"
+
+
+def _rename_gene(old, new):
+    def edit(df):
+        df.loc[df["gene"] == old, "gene"] = new
+    return edit
+
+
+def _sbp_rep(p):
+    def edit(df):
+        setrow(df, "SYNPASS1", "hypertension", "plof", "replication", beta=zgood("hypertension", 1) * 0.1, p=p)
+    return edit
+
+
+def edit_ukb_relabel(df):
+    sel = df["cohort"] == "replication"
+    df.loc[sel, "source"] = "genebass_hypertension_lookup"
+
+
+def edit_no_replication(df):
+    df.drop(df.index[df["cohort"] == "replication"], inplace=True)
+
+
+def edit_dmis_flip(df):
+    setrow(df, "SYNPASS1", "systolic_bp", "dmis", "discovery", z=zbad("systolic_bp", 2))
+
+
+def edit_dmis_missing(df):
+    df.drop(df.index[(df["gene"] == "SYNPASS1") & (df["mask"] == "dmis")], inplace=True)
+
+
+def edit_adverse(df):
+    setrow(df, "SYNPASS1", "coronary_disease", "plof", "discovery", beta=0.9, p=1e-4)
+
+
+def edit_sbp_p_just_above_threshold(df):
+    setrow(df, "SYNPASS1", "systolic_bp", "plof", "discovery", p=2.0e-7)
+
+
+def edit_sbp_harmful(df):
+    setrow(df, "SYNPASS1", "systolic_bp", "plof", "discovery", z=zbad("systolic_bp", 9))
+
+
+PASS_BLOCKERS = [
+    ("ukb_relabelled_replication", edit_ukb_relabel),
+    ("no_replication_cohort", edit_no_replication),
+    ("dmis_direction_disagrees", edit_dmis_flip),
+    ("dmis_missing", edit_dmis_missing),
+    ("adverse_tradeoff_coronary", edit_adverse),
+    ("replication_one_sided_p_0.055", _sbp_rep(0.11)),
+    ("replication_wrong_direction", None),
+    ("discovery_p_2e-7", edit_sbp_p_just_above_threshold),
+    ("discovery_harmful_direction", edit_sbp_harmful),
+    ("lipid_pathway_gene_APOB", _rename_gene("SYNPASS1", "APOB")),
+    ("lipid_pathway_gene_LDLR", _rename_gene("SYNPASS1", "LDLR")),
+]
+
+
+def edit_rep_wrong_direction(df):
+    setrow(df, "SYNPASS1", "hypertension", "plof", "replication", beta=zbad("hypertension", 1) * 0.1, p=1e-9)
+
+
+@pytest.mark.parametrize("name,edit", PASS_BLOCKERS, ids=[n for n, _ in PASS_BLOCKERS])
+def test_each_single_defect_blocks_pass_and_degrades_to_lead(name, edit, base_frames, tmp_path):
+    if edit is None:
+        edit = edit_rep_wrong_direction
+    res, df = mutated_run(base_frames["pass"], edit, tmp_path)
+    ok, tiers, o_verdict = oracle(df)
+    assert res["controls"]["valid"] is True, res["controls"]["failed"]
+    assert res["verdict"]["verdict"] != "PASS", "defect %s still gave PASS" % name
+    assert res["verdict"]["verdict"] == "LEAD"           # SYNLEAD1 (cognitive, Tier B) remains
+    assert res["verdict"]["verdict"] == o_verdict
+    assert result_tiers(res) == tiers
+
+
+def test_replication_one_sided_boundary_end_to_end(base_frames, tmp_path):
+    res, _ = mutated_run(base_frames["pass"], _sbp_rep(0.0999), tmp_path)
+    assert res["verdict"]["verdict"] == "PASS"
+
+
+def test_same_trait_replication_for_cognitive_trait_still_lead_not_pass(base_frames, tmp_path):
+    def edit(df):
+        extra = df[(df["gene"] == "SYNLEAD1") & (df["trait"] == "fluid_intelligence")
+                   & (df["mask"] == "plof") & (df["cohort"] == "discovery")].copy()
+        extra["cohort"] = "replication"
+        extra["source"] = "finngen_r13"
+        extra["p"] = 1e-12
+        df.loc[df.index.max() + 1] = extra.iloc[0]
+    res, df = mutated_run(base_frames["lead"], edit, tmp_path)
+    assert res["verdict"]["verdict"] == "LEAD" and res["verdict"]["pass_genes"] == []
+    assert result_tiers(res)[("SYNLEAD1", "fluid_intelligence")] == "B"
