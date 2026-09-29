@@ -47,3 +47,67 @@ Budget: $0 AWS; local compute and public downloads only; at most 1 working day.
 Record: /Users/mike/.dev/genetics-research/results/protective-scan.json
 
 What this can NOT show: causality beyond Mendelian-randomization-style inference, effects of upregulation or drug/editing interventions, effects in non-European ancestries where not reported, effects of variants too rare to be tested at gene level, or anything about polygenic (common-variant) architecture.
+
+### Step 0 feasibility (no outcomes viewed)   (appended 2026-09-29; data access only, no gene or outcome results were opened)
+
+Method: live page fetches and HTTP/bucket probes. VERIFIED = seen on a live page or probe today. UNVERIFIED = search summary only, or not reachable.
+
+**1. Genebass (UKB exomes) -- discovery candidate**
+- Bulk data: Hail tables in Google Cloud Storage. Paths quoted by the rivas-lab repo (https://github.com/rivas-lab/phenome-wide-unified-model): `gs://ukbb-exome-public/500k/results/results.mt` (gene burden), `variant_results.mt`, `pheno_results.ht`. Hail 0.2.13 stated as prerequisite. Path-in-code VERIFIED via repo; no official page fetched (genebass.org and the Cell Genomics paper returned SPA shell / 403).
+- Bucket is REQUESTER PAYS (VERIFIED by probe: "Bucket is a requester pays bucket but no user project provided", HTTP 400). Any download needs a GCP project with billing enabled. The ledger budget says "$0 AWS", so AWS credit is unaffected, but "public downloads only, $0" is not literally true: a small GCP egress charge is expected. Total size UNVERIFIED (listing blocked without a billing project). Egress at Google list price ~USD 0.12/GB is UNVERIFIED. Mitigation: Hail reads only the needed rows/columns (13 + 9 + control phenotypes, 3 masks), so egress should be a fraction of the full table.
+- Cohort: 394,841 exomes in the Cell Genomics paper (https://www.cell.com/cell-genomics/fulltext/S2666-979X(22)00110-0, search summary); 426,370 European-ancestry per the Open Targets blog (https://blog.opentargets.org/how-open-targets-integrates-gene-burden/). Which of these the `500k/` folder holds is UNVERIFIED. 4,529 phenotypes (search summary).
+- Masks: pLoF, missense|LC, synonymous, pLoF|missense|LC and SKAT-O/burden tests -- UNVERIFIED (recalled; not confirmed on a live page). Must be confirmed at first read of `results.mt` before any outcome is looked at.
+- Full gene-by-phenotype table downloadable: YES in principle (matrix table, not only a browser UI). Not tested (needs billing project).
+- Local environment: no gcloud, no gsutil, no hail installed; python 3.14.4. Hail compatibility with 3.14 UNVERIFIED; plan a separate Python 3.11 venv.
+
+**2. AstraZeneca PheWAS Portal (UKB exomes) -- consistency check only**
+- Portal https://azphewas.com/ is a JS app; landing page has no readable content. ~450k to 484k UKB exomes, 10 to 12 collapsing models, ptv/missense/synonymous mentioned (search summaries; UNVERIFIED on a live page).
+- Bulk downloads exist at https://public.cgr.astrazeneca.com/BULK-DOWNLOAD/V01/ (VERIFIED, licence v1.2 effective 26 Nov 2025; research use only, no clinical use, redistribution allowed with the licence, attribution to Wang et al. Nature 2021). The V01 page lists ONLY: CNV gene-level PheWAS (binary + quantitative, per ancestry AFR/ASJ/EAS/NFE/SAS) and variant-level ExWAS files (`exwas_ukb500k_<ANC>_{binary,quantitative}.csv.xz`, ancestries incl. AMR). Gene-level exome collapsing (ptv, missense) is NOT listed there. Direct GET of the files returns 403 without the page's "I agree" step; file sizes UNVERIFIED. Path probes returning HTTP 200 are a catch-all page and prove nothing.
+- Consequence: AZ gene-level pLoF results are reachable only through the interactive portal (per-gene/phenotype download UNVERIFIED) -- not a bulk source at present.
+
+**3. Replication candidates (independence from UKB is the constraint)**
+- FinnGen (independent of UKB). https://www.finngen.fi/en/access_results: latest DF13 (2 Jun 2026, 500,186 people); gene-based LoF results NOT listed for DF13; earlier releases (DF8, DF10 to DF12) list regenie gene-based burden results (VERIFIED on the results page). Docs: https://finngen.gitbook.io/documentation/methods/lof-variant-burden -- LoF = frameshift, splice donor, stop gained, splice acceptor; MAF <= 0.01; info >= 0.8; 4,793 autosomal genes; 2,751 BINARY endpoints only; regenie max mask. Data path for R11: `/finngen/library-green/finngen_R11/finngen_R11_analysis_data/lof/data` (FinnGen Sandbox naming; whether publicly downloadable UNVERIFIED). Summary-stat download requires an online form; instructions arrive by email. LoF calls come from imputed genotypes (not exome sequencing) and are pLoF-only: no missense or synonymous mask, so the synonymous null cannot be run in FinnGen.
+- FinnGen coverage of the panel: none of the 13 target traits is a binary endpoint. Lab-value GWAS (383 measurements, https://labvalues.finngen.fi/) are single-variant, not gene-based (gene-level UNVERIFIED). Trade-off outcomes (T2D, CAD, cancer, dementia, depression, schizophrenia, fracture, infertility) are FinnGen endpoints in principle; exact endpoint names UNVERIFIED. All-cause mortality endpoint UNVERIFIED.
+- All of Us "All by All" (independent of UKB): gene-based Hail matrix tables (21 MTs; 3,500+ phenotypes incl. physical and lab measurements) per ancestry and meta-analysis, keyed by gene_id, gene_symbol, annotation, max_MAF (search summary of https://support.researchallofus.org/hc/en-us/articles/27049847988884; the article itself returned 403). Access is inside the Researcher Workbench with permissions -- not an open download; registration/tier requirements UNVERIFIED. Likely covers BMI, SBP, pulse, LDL; unlikely to cover the cognitive tests, grip, reaction time.
+- Regeneron (RGC-ME): browser https://rgc-research.regeneron.com/me has variant-level data (983,578 individuals); the burden results integrated in Open Targets are from the same UKB data (454,787), so NOT independent of UKB. Gene-burden bulk download UNVERIFIED.
+- Biobank Japan / Taiwan Biobank / Mount Sinai BioMe: no open gene-based burden tables found (array-based GWAS only for TWB/BBJ). UNVERIFIED that none exist.
+- UKB overlap: Genebass, AZ and Regeneron-in-Open-Targets all use the same UKB exomes (Open Targets blog: "All three sources utilize the same UK Biobank exome sequencing data"). They are one cohort, not replication of each other.
+
+**4. gnomAD v4.1 constraint -- available, small**
+- `https://storage.googleapis.com/gcp-public-data--gnomad/release/4.1/constraint/gnomad.v4.1.constraint_metrics.tsv` -- HTTP 200, 95,546,041 bytes (~91 MiB), last modified 18 Apr 2024 (VERIFIED). Hail table `gnomad.v4.1.constraint_metrics.ht` and `README.txt` (column dictionary incl. `lof.oe_ci.upper` = LOEUF, `lof.pLI`) also present (VERIFIED). No registration. Licence terms not fetched (UNVERIFIED; gnomAD is generally open).
+
+**5. Trait coverage at the UKB level (13 targets)**
+Checked against the open Pan-UKB phenotype manifest (https://pan-ukb-us-east-1.s3.amazonaws.com/sumstats_release/phenotype_manifest.tsv.bgz, 7,223 rows, VERIFIED). This shows the trait exists in UKB; whether each is included in Genebass or AZ is UNVERIFIED (Genebass's own phenotype list not retrieved).
+| Target trait | UKB field / manifest entry | Max n (EUR cases col) | Note |
+|---|---|---|---|
+| Fluid intelligence | 20016 | 135,088 | subset with the test; low power for rare genes |
+| Reaction time | 20023 "Mean time to correctly identify matches" | 417,660 | |
+| Numeric memory | 4282 "Maximum digits remembered correctly" | 43,741 | very low power |
+| Pairs matching errors | 399 "Number of incorrect matches in round" | 419,951 | |
+| Education years | 845 "Age completed full time education" (22501 "Year ended full time education", n 106,229) | 283,575 | not literally years of education; already flagged as confounded proxy |
+| Hand grip | 46 (left), 47 (right) | 418,776 / 418,827 | two fields; combine rule needed |
+| FEV1 | 3063 (also 20150 best measure) | 383,471 | |
+| Walking pace | 924 | 417,933 | ordinal |
+| Resting heart rate | 102 | 396,667 | |
+| Systolic BP | 4080 (also medication-adjusted `SBP`) | 396,663 | |
+| LDL | 30780 (also medication-adjusted `LDLC`) | 400,223 | |
+| BMI | 21001 | 419,163 | |
+| Parental lifespan | 1807 (father's age at death), 3526 (mother's age at death) | 310,232 / 249,247 | not a single field; combine rule needed |
+All 13 exist in UKB. Absent-from-source handling stays as ledger says.
+
+**6. Recommended assignment (keeps cohorts independent)**
+- Discovery: Genebass (UKB). Pull only: 13 panel traits + 9 trade-off outcomes + PCSK9/ANGPTL4/APOC3 lipid control phenotypes; pLoF, missense|LC and synonymous masks.
+- Within-UKB consistency (NOT replication, not counted in tiers): AZ portal pLoF for the same genes, by hand through the portal or a later bulk file.
+- Replication: FinnGen gene-based LoF (binary endpoints; trade-off screen, plus panel-trait proxies) and All of Us All by All (BMI, SBP, pulse, LDL, physical measurements) if access is obtainable. Cognitive traits (fluid intelligence, reaction time, numeric memory, pairs matching, education) have no independent gene-level replication source found; by the ledger's tier rules these can reach Tier B only.
+- Constraint: gnomAD v4.1 TSV.
+- Estimated download: gnomAD 91 MiB (verified). Genebass filtered pull: UNVERIFIED, expected in the low GB range with Hail row/column filtering (full `results.mt` likely much larger). FinnGen gene-based tables and All of Us: UNVERIFIED.
+
+**7. Issues this raises for the ledger rules (recommendation only; the entry above is NOT edited)**
+1. Budget: requester-pays means the public-download step needs a GCP project with billing (small GCP charge; AWS credit unaffected).
+2. PASS reachability: PASS requires a Tier-A non-lipid gene for a cognitive or physical trait. Tier A requires replication in the same trait "or its declared proxy". FinnGen has binary endpoints only and All of Us lacks cognitive traits, so unless proxies are declared, cognitive traits cap at Tier B and PASS is nearly unreachable for them. Proxies for physical traits (e.g. FEV1 -> COPD/asthma endpoints; SBP -> hypertension; BMI -> obesity; resting HR -> arrhythmia endpoints) must be declared in a new dated entry BEFORE any outcome is viewed.
+3. Permutation controls cannot be run from summary statistics: the trivial rung ("phenotype-permuted burden results") and the negative control ("permuted run yields zero genes") require individual-level data, which the ledger rules out ("public gene-based burden results only"). Replace with summary-level nulls in a new dated entry (synonymous-mask null and lambda_GC already exist; a summary-level substitute for the permuted rung is a decision for the ledger owner).
+4. Synonymous null cannot be run in FinnGen (pLoF-only) or in AZ bulk (not listed); only Genebass (mask existence UNVERIFIED) and possibly the AZ portal.
+5. Power: numeric memory (n ~44K) and fluid intelligence (n ~135K) make gene-level rare pLoF tests weak at p < 1.9e-7; expect few or no cognitive discoveries regardless of biology. That is a power limit, not evidence against protective variants.
+6. Genebass release ambiguity (394,841 vs 426,370; folder `500k`) must be settled from the table metadata at first read, before phenotype rows are opened.
+
+Human actions needed before the run: (a) a GCP project with billing enabled and `gcloud auth application-default login` for requester-pays reads; (b) submit the FinnGen download form (https://elomake.helsinki.fi/lomakkeet/124935/lomake.html) and note which release has gene-based files; (c) decide whether to pursue All of Us Researcher Workbench access; (d) approve a dated amendment entry for items 1 to 3 above.
