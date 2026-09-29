@@ -1,0 +1,103 @@
+# Mirrors experiments.md entry "2026-09-29 protective-variant-scan" + AMENDMENT 1.
+# Change only via a new dated ledger entry.
+ledger_entry: "2026-09-29 protective-variant-scan (with AMENDMENT 1)"
+
+masks:
+  primary: plof
+  consistency: dmis
+  negative_control: syn
+
+# cohort roles in the normalized table
+cohorts:
+  discovery: discovery              # UK Biobank exomes (Genebass)
+  replication: replication          # cohort independent of UK Biobank
+  eur_only: discovery_eur           # optional EUR-only re-analysis of discovery
+
+# benefit: +1 = higher value is beneficial, -1 = lower value is beneficial.
+# Betas in the normalized table are on the raw trait scale (log-odds for binary outcomes).
+panel:
+  fluid_intelligence:    {domain: cognitive, benefit: 1}
+  reaction_time:         {domain: cognitive, benefit: -1}   # faster = lower time
+  numeric_memory:        {domain: cognitive, benefit: 1}
+  pairs_matching_errors: {domain: cognitive, benefit: -1}   # fewer errors
+  education_years:       {domain: cognitive, benefit: 1}    # confounded proxy
+  hand_grip_strength:    {domain: physical, benefit: 1}
+  fev1:                  {domain: physical, benefit: 1}
+  walking_pace:          {domain: physical, benefit: 1}     # higher = faster
+  resting_heart_rate:    {domain: physical, benefit: -1}
+  systolic_bp:           {domain: physical, benefit: -1}
+  ldl:                   {domain: metabolic, benefit: -1}
+  bmi:                   {domain: metabolic, benefit: -1}
+  parental_lifespan:     {domain: metabolic, benefit: 1}
+
+# Trade-off panel. benefit -1 for all: higher risk/hazard (beta > 0) is the adverse direction.
+tradeoff:
+  type_2_diabetes:      {benefit: -1}
+  coronary_disease:     {benefit: -1}
+  cancer_any:           {benefit: -1}
+  dementia:             {benefit: -1}
+  major_depression:     {benefit: -1}
+  schizophrenia:        {benefit: -1}
+  all_cause_mortality:  {benefit: -1}
+  fracture:             {benefit: -1}
+  infertility:          {benefit: -1}
+
+# Extra phenotype used only by the ANGPTL4/APOC3 positive control (not a panel trait).
+control_traits:
+  triglycerides: {benefit: -1}
+
+discovery:
+  alpha: 0.05
+  n_genes: 20000
+  n_traits: 13
+  p_threshold: 1.9e-7        # ledger value (0.05 / (20000 x 13) = 1.92e-7, rounded down = stricter)
+
+replication:
+  one_sided_p: 0.05
+  # AMENDMENT 1: declared proxies, fixed. Only these traits can reach Tier A; all others cap at Tier B.
+  # Key = panel trait; trait = name of the proxy in the normalized replication table.
+  proxies:
+    ldl:         {trait: hypercholesterolemia, benefit: -1}
+    bmi:         {trait: obesity,              benefit: -1}
+    systolic_bp: {trait: hypertension,         benefit: -1}
+
+tradeoff_screen:
+  alpha: 0.05                # divided by N_tradeoff (9); one-sided, harmful direction, plof mask
+
+controls:
+  lambda_gc_max: 1.10        # synonymous mask, all genes and traits pooled
+  syn_hits_max: 0            # synonymous-mask genes at discovery threshold, beneficial direction
+  positive:
+    - {id: pcsk9_ldl_lower,      genes: [PCSK9],          trait: ldl,              at_discovery_threshold: true}
+    - {id: pcsk9_cad_protective, genes: [PCSK9],          trait: coronary_disease, at_discovery_threshold: false}
+    - {id: lipid_lowering,       genes: [ANGPTL4, APOC3], trait: triglycerides,    at_discovery_threshold: true}   # any one gene suffices
+
+verdict:
+  # Ledger: "cognitive or physical trait that is not a lipid-pathway gene".
+  qualifying_domains: [cognitive, physical]
+  # The ledger does not enumerate lipid-pathway genes; this list is an implementation choice.
+  lipid_pathway_genes:
+    - PCSK9
+    - ANGPTL3
+    - ANGPTL4
+    - ANGPTL8
+    - APOC3
+    - APOA5
+    - APOB
+    - APOE
+    - LDLR
+    - LDLRAP1
+    - LPL
+    - LPA
+    - CETP
+    - LIPC
+    - MTTP
+    - NPC1L1
+    - ABCG5
+    - ABCG8
+    - HMGCR
+    - SORT1
+    - LIPG
+    - GPIHBP1
+    - LMF1
+    - ANGPTL1
