@@ -73,7 +73,7 @@ Files (bucket `finngen-public-data-r13`, prefix `lof/`; listed 2026-09-29):
 | `lof/finngen_R13_lof_readme` | 1,435 | `QInxG/+LQPcFS9miTgs7Kw==` |
 | `summary_stats/finngen_R13_manifest.tsv` | 820,805 | `pw9Oy1es98I+j11xvhHZNg==` |
 
-Method (readme + docs): regenie step 2, burden mode, max mask over LoF variants; LoF = frameshift, splice donor, splice acceptor, stop gained (VEP, no LOFTEE); MAF <= 0.01; info >= 0.8; 4,909 autosomal genes; core binary endpoints only (PD_DEMENTIA_EXMORE removed); LoF from imputed genotypes. PLoF mask only: no `dmis`, no `syn`.
+Method (readme + docs): regenie step 2, burden mode, max mask over LoF variants; LoF = frameshift, splice donor, splice acceptor, stop gained (VEP, no LOFTEE); MAF <= 0.01; info >= 0.8; 4,909 autosomal genes per the readme (the docs page says 4,793; the table holds 4,793 for the endpoints extracted); core binary endpoints only (PD_DEMENTIA_EXMORE removed); LoF from imputed genotypes. PLoF mask only: no `dmis`, no `syn`.
 
 ### 3.1 Declared proxies (Amendment 1), exact endpoint codes (verified in the R13 manifest and Risteys)
 
