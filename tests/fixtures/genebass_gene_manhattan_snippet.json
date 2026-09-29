@@ -1,0 +1,11 @@
+[
+  {"gene_symbol": "GENEA", "gene_id": "ENSG00000000001", "pos": 100, "chrom": "1", "BETA_Burden": -0.5, "Pvalue": 0.001, "Pvalue_SKAT": 0.01, "Pvalue_Burden": 5.733031438470704e-07},
+  {"gene_symbol": "GENEB", "gene_id": "ENSG00000000002", "pos": 200, "chrom": "2", "BETA_Burden": 0.2, "Pvalue": 0.5, "Pvalue_SKAT": 0.5, "Pvalue_Burden": 0.04},
+  {"gene_symbol": "GENEC", "gene_id": "ENSG00000000003", "pos": 300, "chrom": "3", "BETA_Burden": null, "Pvalue": null, "Pvalue_SKAT": null, "Pvalue_Burden": null},
+  {"gene_symbol": "DUPSYM", "gene_id": "ENSG00000000004", "pos": 400, "chrom": "4", "BETA_Burden": 0.1, "Pvalue": 0.3, "Pvalue_SKAT": 0.3, "Pvalue_Burden": 0.3},
+  {"gene_symbol": "DUPSYM", "gene_id": "ENSG00000000005", "pos": 500, "chrom": "5", "BETA_Burden": -0.1, "Pvalue": 0.3, "Pvalue_SKAT": 0.3, "Pvalue_Burden": 0.3},
+  {"gene_symbol": "GENED", "gene_id": "ENSG00000000006", "pos": 600, "chrom": "6", "BETA_Burden": 0.0, "Pvalue": 1.0, "Pvalue_SKAT": 1.0, "Pvalue_Burden": 1.0},
+  {"gene_symbol": "GENEE", "gene_id": "ENSG00000000007", "pos": 700, "chrom": "7", "BETA_Burden": 0.3, "Pvalue": 0.01, "Pvalue_SKAT": 0.01, "Pvalue_Burden": 0.01},
+  {"gene_symbol": "GENEF", "gene_id": "ENSG00000000008", "pos": 800, "chrom": "8", "BETA_Burden": 1.0, "Pvalue": 0.0, "Pvalue_SKAT": 0.0, "Pvalue_Burden": 0.0},
+  {"gene_symbol": "GENEG", "gene_id": "ENSG00000000009", "pos": 900, "chrom": "9", "BETA_Burden": 0.4, "Pvalue": 0.02, "Pvalue_SKAT": 0.02, "Pvalue_Burden": 0.02}
+]
