@@ -21,6 +21,7 @@ Key `(gene, trait, mask, cohort)` must be unique across all files. Rows with NaN
 
 - `discovery`: UK Biobank exome burden (Genebass). Masks `plof`, `dmis`, `syn`. Traits: 13 panel traits, 9 trade-off outcomes, `triglycerides` (control).
 - `replication`: cohort independent of UK Biobank (FinnGen etc.). Only `plof` is read. Traits: the declared proxy names (below) and/or trade-off outcomes. Same-trait rows for `ldl`, `bmi`, `systolic_bp` are also accepted. Rows for other panel traits are ignored for tiering (Amendment 1: Tier B ceiling).
+  Independence is enforced on the `source` string (case-insensitive substring): it must contain an allow token (`finngen`, `all_of_us`, `allofus`, `synthetic_replication`) and no UK Biobank token (`genebass`, `azphewas`, `astrazeneca`, `regeneron`, `rgc`, `ukb`, `uk_biobank`, `opentargets`, `backman`, `pan_ukb`, ...). Rows from any other source are ignored for replication and listed under `data.replication_sources_excluded` in the JSON. Tokens live in `config/prereg.yaml` (`replication.independent_sources`, `replication.ukb_overlapping_sources`); adding one needs a dated ledger entry.
 - `discovery_eur`: optional EUR-only re-analysis of discovery, `plof` mask, same traits. Reported, not gating.
 
 ## Files

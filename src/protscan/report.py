@@ -8,16 +8,16 @@ def _fmt(x, spec=".3g"):
     return "NA" if x is None else format(x, spec)
 
 
-def _tier_table(rows: list) -> list:
+def _tier_table(rows: list, n_tradeoff: int) -> list:
     if not rows:
         return ["(none)", ""]
-    out = ["| gene | trait | beta | p | replication | dmis | EUR-only | adverse | lipid | qualifies | LOEUF |",
-           "|---|---|---|---|---|---|---|---|---|---|---|"]
+    out = ["| gene | trait | beta | p | replication | dmis | EUR-only | adverse | screened | lipid | qualifies | LOEUF |",
+           "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in rows[:MAX_ROWS]:
         rep = r["rep_status"] if r["rep_trait"] is None else f"{r['rep_status']} ({r['rep_trait']}, p1={_fmt(r['rep_p_onesided'])})"
         adv = ", ".join(a["trait"] for a in r["adverse"]) or "-"
         out.append(f"| {r['gene']} | {r['trait']} | {_fmt(r['beta'])} | {_fmt(r['p'])} | {rep} | {r['mask_status']} | "
-                   f"{r['eur_status']} | {adv} | {'yes' if r['lipid_gene'] else 'no'} | {'yes' if r['qualifies'] else 'no'} | "
+                   f"{r['eur_status']} | {adv} | {r['n_tradeoff_tested']}/{n_tradeoff} | {'yes' if r['lipid_gene'] else 'no'} | {'yes' if r['qualifies'] else 'no'} | "
                    f"{_fmt(r.get('loeuf'))} |")
     if len(rows) > MAX_ROWS:
         out.append(f"... {len(rows) - MAX_ROWS} more in the JSON")
@@ -81,12 +81,13 @@ def render(res: dict) -> str:
     for tier in "ABCD":
         rows = res["tiers"][tier]
         L += [f"### Tier {tier}: {names[tier]} (genes: {len({r['gene'] for r in rows})}, gene-trait pairs: {len(rows)})", ""]
-        L += _tier_table(rows)
+        L += _tier_table(rows, res["thresholds"]["n_tradeoff"])
 
     L += ["## Notes", "",
           "- Replication counts only a cohort independent of UK Biobank; only traits with a declared proxy (LDL, BMI, SBP) can reach Tier A. "
           "Within-UKB consistency (dmis mask) is reported and never counted as replication; AstraZeneca portal lookups are not automated.",
-          "- EUR-only column is reported and does not gate the verdict.",
+          "- EUR-only column is reported and does not gate the verdict. 'screened' = trade-off outcomes with a pLoF row for the gene; "
+          "unscreened outcomes cannot be excluded as adverse.",
           f"- Traits absent from discovery: {', '.join(d['traits_absent']['discovery']) or 'none'}.",
           f"- Traits absent from replication: {', '.join(d['traits_absent']['replication']) or 'none'}.",
           ""]

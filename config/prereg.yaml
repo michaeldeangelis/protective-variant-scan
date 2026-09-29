@@ -54,6 +54,12 @@ discovery:
 
 replication:
   one_sided_p: 0.05
+  # Amendment 1: replication must be a cohort independent of UK Biobank. A replication row counts only if its
+  # `source` (case-insensitive) contains an allow token AND no deny token. Unknown sources are excluded and
+  # listed in the JSON; add an allow token only via a dated ledger entry.
+  independent_sources: [finngen, all_of_us, allofus, synthetic_replication]
+  ukb_overlapping_sources: [genebass, azphewas, az_phewas, astrazeneca, regeneron, rgc, ukb, uk_biobank, uk-biobank,
+                            uk biobank, opentargets, open_targets, backman, pan_ukb]
   # AMENDMENT 1: declared proxies, fixed. Only these traits can reach Tier A; all others cap at Tier B.
   # Key = panel trait; trait = name of the proxy in the normalized replication table.
   proxies:

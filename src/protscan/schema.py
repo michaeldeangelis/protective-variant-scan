@@ -26,6 +26,8 @@ class Config:
     discovery_p: float
     replication_p: float
     proxies: dict          # panel trait -> {"trait": str, "benefit": int}
+    independent_sources: tuple  # source-name tokens accepted as independent of UK Biobank
+    ukb_sources: tuple     # source-name tokens that mark a row as UK Biobank (overrides the allow list)
     tradeoff_p: float
     lambda_gc_max: float
     syn_hits_max: int
@@ -101,6 +103,8 @@ def load_config(path) -> Config:
         discovery_p=float(d["p_threshold"]),
         replication_p=float(y["replication"]["one_sided_p"]),
         proxies=proxies,
+        independent_sources=tuple(t.lower() for t in y["replication"]["independent_sources"]),
+        ukb_sources=tuple(t.lower() for t in y["replication"]["ukb_overlapping_sources"]),
         tradeoff_p=float(y["tradeoff_screen"]["alpha"]) / len(tradeoff_sign),
         lambda_gc_max=float(y["controls"]["lambda_gc_max"]),
         syn_hits_max=int(y["controls"]["syn_hits_max"]),

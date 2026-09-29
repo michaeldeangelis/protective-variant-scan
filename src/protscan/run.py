@@ -118,8 +118,10 @@ def run_pipeline(config_path, data_dir, out_path) -> dict:
     cpath = data_dir / "constraint.csv"
     if cpath.exists():
         c = pd.read_csv(cpath)
-        c["gene"] = c["gene"].astype(str).str.upper()
-        constraint = dict(zip(c["gene"], c["loeuf"]))
+        if not {"gene", "loeuf"} <= set(c.columns):
+            raise ValueError("constraint.csv needs columns gene, loeuf")
+        c = c.dropna(subset=["loeuf"])
+        constraint = dict(zip(c["gene"].astype(str).str.upper(), c["loeuf"].astype(float)))
 
     def records(t):
         rows = [_clean(r) for r in hits[hits["tier"] == t].to_dict("records")]
@@ -137,10 +139,13 @@ def run_pipeline(config_path, data_dir, out_path) -> dict:
             "synthetic": any(s.startswith("synthetic") for v in sources.values() for s in v),
             "traits_absent": _absent(df, cfg),
             "constraint_file": bool(constraint),
+            "replication_sources_excluded": sorted(
+                set(df.loc[(df["cohort"] == "replication") & (df["mask"] == "plof"), "source"])
+                - set(stats.independent_replication(df, cfg)["source"])),
         },
         "thresholds": {
             "discovery_p": cfg.discovery_p, "replication_one_sided_p": cfg.replication_p,
-            "tradeoff_p": cfg.tradeoff_p, "lambda_gc_max": cfg.lambda_gc_max,
+            "tradeoff_p": cfg.tradeoff_p, "lambda_gc_max": cfg.lambda_gc_max, "n_tradeoff": len(cfg.tradeoff),
         },
         "controls": ctrl,
         "rungs": _rungs(cfg, ctrl, disc, hits, incumbent),
