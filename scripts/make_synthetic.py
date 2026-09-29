@@ -11,6 +11,7 @@ Scenarios (expected verdict on the default config):
   broken_positive   KILL   PCSK9 effects removed
   broken_lambda     KILL   synonymous z-scores inflated (lambda_GC ~1.7)
   broken_syn_hit    KILL   one synonymous-mask gene at the discovery threshold, beneficial direction
+  broken_rep_sign   KILL   replication betas sign-flipped: PCSK9/LDLR replication-sign control fails (C10b)
   unscreened        KILL   SYNPASS1 replicates but only 4 of 9 trade-offs are screened: capped at Tier B (C1),
                            and Tier B unscreened does not count toward LEAD (C9); it is the only candidate
 """
@@ -25,10 +26,12 @@ from scipy.stats import norm
 
 from protscan.schema import COLUMNS, load_config
 
-SCENARIOS = ("pass", "lead", "nolead", "broken_positive", "broken_lambda", "broken_syn_hit", "unscreened")
+SCENARIOS = ("pass", "lead", "nolead", "broken_positive", "broken_lambda", "broken_syn_hit", "unscreened", "broken_rep_sign")
 BINARY_SE_SCALE = 3.0
 N_TOTAL = {"discovery": 400_000, "replication": 300_000}
 CARRIERS = {"plof": 150, "dmis": 1500, "syn": 3000}
+# C10a: the synonymous universe must have >= 10,000 rows (23 traits per gene), so n_genes is floored.
+MIN_GENES = 450
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config" / "prereg.yaml"
 
 
@@ -69,6 +72,7 @@ def make_synthetic(scenario="pass", seed=20260929, n_genes=3000, config_path=DEF
     if scenario not in SCENARIOS:
         raise ValueError(f"scenario must be one of {SCENARIOS}")
     cfg = load_config(config_path)
+    n_genes = max(n_genes, MIN_GENES)
     rng = np.random.default_rng(seed)
     ben = cfg.sign
 
@@ -78,7 +82,7 @@ def make_synthetic(scenario="pass", seed=20260929, n_genes=3000, config_path=DEF
     def bad(trait, z):
         return -ben(trait) * abs(z)
 
-    planted = ["PCSK9", "ANGPTL4", "APOC3", "SYNPASS1", "SYNLEAD1", "SYNADV1", "SYNFAIL1", "SYNMASK1", "SYNSYN1"]
+    planted = ["PCSK9", "ANGPTL4", "APOC3", "LDLR", "SYNPASS1", "SYNLEAD1", "SYNADV1", "SYNFAIL1", "SYNMASK1", "SYNSYN1"]
     genes = planted + [f"SYNG{i:05d}" for i in range(n_genes)]
     d_traits = list(cfg.panel) + list(cfg.tradeoff) + list(cfg.control_sign)
     se_scale = {t: (BINARY_SE_SCALE if t in cfg.tradeoff else 1.0) for t in d_traits}
@@ -90,7 +94,7 @@ def make_synthetic(scenario="pass", seed=20260929, n_genes=3000, config_path=DEF
     r_genes = planted + [g for g in genes[len(planted):] if rng.random() < 0.5]
     rep = _frame(r_genes, r_traits, ["plof"], "replication", "synthetic_replication", r_scale, rng)
 
-    clean = ["SYNPASS1", "SYNLEAD1", "SYNFAIL1", "SYNMASK1"]
+    clean = ["PCSK9", "SYNPASS1", "SYNLEAD1", "SYNFAIL1", "SYNMASK1"]
     _clip_z(disc, clean, list(cfg.tradeoff))
     _clip_z(rep, clean, list(cfg.tradeoff))
 
@@ -100,6 +104,8 @@ def make_synthetic(scenario="pass", seed=20260929, n_genes=3000, config_path=DEF
         _set_z(disc, "PCSK9", "ldl", "dmis", good("ldl", 3))
         _set_z(disc, "PCSK9", "coronary_disease", "plof", good("coronary_disease", 4))
         _set_z(rep, "PCSK9", "hypercholesterolemia", "plof", good("hypercholesterolemia", 6))
+    # replication-sign control (C10b): LDLR loss of function raises hypercholesterolemia risk
+    _set_z(rep, "LDLR", "hypercholesterolemia", "plof", bad("hypercholesterolemia", 5))
     _set_z(disc, "ANGPTL4", "triglycerides", "plof", good("triglycerides", 9))
     _set_z(disc, "APOC3", "triglycerides", "plof", good("triglycerides", 12))
 
@@ -140,6 +146,8 @@ def make_synthetic(scenario="pass", seed=20260929, n_genes=3000, config_path=DEF
     if scenario == "broken_syn_hit":
         _set_z(disc, "SYNSYN1", "hand_grip_strength", "syn", good("hand_grip_strength", 7))
 
+    if scenario == "broken_rep_sign":
+        rep["beta"] = -rep["beta"]
     if scenario == "unscreened":
         drop = list(cfg.tradeoff)[4:]
         disc = disc[~((disc.gene == "SYNPASS1") & disc.trait.isin(drop))]
@@ -164,7 +172,7 @@ def main():
     ap.add_argument("--out", default="data/synthetic")
     ap.add_argument("--scenario", default="pass", choices=SCENARIOS)
     ap.add_argument("--seed", type=int, default=20260929)
-    ap.add_argument("--n-genes", type=int, default=3000)
+    ap.add_argument("--n-genes", type=int, default=3000, help=f"floored at {MIN_GENES}")
     ap.add_argument("--config", default=str(DEFAULT_CONFIG))
     a = ap.parse_args()
     tables = make_synthetic(a.scenario, a.seed, a.n_genes, a.config)

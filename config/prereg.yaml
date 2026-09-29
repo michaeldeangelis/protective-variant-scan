@@ -74,6 +74,15 @@ tradeoff_screen:
 controls:
   lambda_gc_max: 1.10        # synonymous mask, all genes and traits pooled
   syn_hits_max: 0            # synonymous-mask genes at discovery threshold, beneficial direction
+  # C10a: the synonymous control is evaluable only if syn rows cover >= 90% of the (gene, trait) pairs that have a
+  # plof discovery row AND number >= 10,000; otherwise controls_not_evaluable (KILL).
+  syn_min_coverage: 0.90
+  syn_min_rows: 10000
+  # C10b: replication-sign control from established biology. In the independent replication cohort, on the
+  # hypercholesterolemia proxy (plof): PCSK9 beta < 0, LDLR beta > 0. >= 1 must be evaluable; every evaluable one must hold.
+  replication_sign:
+    - {id: pcsk9_rep_sign, gene: PCSK9, trait: hypercholesterolemia, expected_beta_sign: -1}
+    - {id: ldlr_rep_sign,  gene: LDLR,  trait: hypercholesterolemia, expected_beta_sign: 1}
   positive:
     - {id: pcsk9_ldl_lower,      genes: [PCSK9],          trait: ldl,              at_discovery_threshold: true}
     - {id: pcsk9_cad_protective, genes: [PCSK9],          trait: coronary_disease, at_discovery_threshold: false}

@@ -140,19 +140,26 @@ def test_build_hits_empty():
     assert tiering.build_hits(df, cfg).empty
 
 
+def _syn_universe(n, seed=2, p_power=1.0):
+    """n (gene, trait) pairs with null plof and syn rows, so coverage is 1.0 and syn rows == n."""
+    rng = np.random.default_rng(seed)
+    rows = []
+    for mask in ("plof", "syn"):
+        u = rng.uniform(size=n) ** (p_power if mask == "syn" else 1.0)
+        rows += [row(f"S{i}", "fev1", mask=mask, beta=0.0, p=float(u[i])) for i in range(n)]
+    return rows
+
+
 def test_negative_control_thresholds():
-    rng = np.random.default_rng(2)
-    n = 5000
-    base = [row(f"S{i}", "fev1", mask="syn", beta=0.0, p=float(rng.uniform())) for i in range(n)]
+    base = _syn_universe(10_000)
     ok = controls.negative_control(table(*base), cfg)
-    assert ok["status"] == "OK"
+    assert ok["status"] == "OK" and ok["coverage"] == 1.0
     hit = controls.negative_control(table(*base, row("H", "fev1", mask="syn", beta=0.5, p=1e-9)), cfg)
     assert hit["status"] == "FAIL" and hit["n_syn_hit_genes"] == 1 and hit["lambda_ok"]
     # a hit in the harmful direction does not count
     wrong = controls.negative_control(table(*base, row("H", "fev1", mask="syn", beta=-0.5, p=1e-9)), cfg)
     assert wrong["status"] == "OK"
-    inflated = [row(f"S{i}", "fev1", mask="syn", beta=0.0, p=float(rng.uniform() ** 1.5)) for i in range(n)]
-    assert controls.negative_control(table(*inflated), cfg)["status"] == "FAIL"
+    assert controls.negative_control(table(*_syn_universe(10_000, p_power=1.5)), cfg)["status"] == "FAIL"
     assert controls.negative_control(table(row("A", "fev1")), cfg)["status"] == "NOT RUN"
 
 
