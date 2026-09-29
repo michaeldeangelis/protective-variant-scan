@@ -111,6 +111,7 @@ def test_ukb_sourced_replication_rows_are_excluded_and_listed(make):
     def relabel(t):
         rep = t["burden_synthetic_replication"]
         t["burden_synthetic_replication"] = rep.assign(source="Genebass_replicate")
+        t["burden_synthetic_discovery"] = t["burden_synthetic_discovery"].assign(source="genebass_disc")   # no synthetic/real mix
         return t
     r = run(make("pass", "ukbrep", relabel))
     assert r["data"]["replication_sources_excluded"] == ["Genebass_replicate"]

@@ -15,7 +15,7 @@ Adapters emit, and `python -m protscan run` reads, a long table: one row per gen
 | n_total | int | total individuals tested |
 | source | str | dataset name (e.g. `genebass`, `finngen_r12`); a name starting with `synthetic` triggers a banner in the report |
 
-Key `(gene, trait, mask, cohort)` must be unique across all files. Rows with NaN beta/se/p are dropped and counted. Invalid mask/cohort, p outside [0,1], negative se, or duplicate keys raise an error.
+Key `(gene, trait, mask, cohort)` must be unique across all files. Rows with NaN beta or p are dropped and counted; se may be NaN (rows with beta = 0 or p = 1 are kept for lambda_GC and hit counting). Invalid mask/cohort, p outside [0,1], negative se, or duplicate keys raise an error.
 
 ## Cohorts
 
@@ -31,6 +31,13 @@ Read from the top level of the `--data` directory only:
 - `burden*.csv` or `burden*.csv.gz`: normalized tables (any number; concatenated). Suggested: `burden_genebass.csv.gz`, `burden_finngen.csv.gz`.
 - `incumbent_hits.csv` (optional): columns `gene,trait[,source]`; published top gene-level hits for the panel traits. Absent -> incumbent rung reported NOT RUN.
 - `constraint.csv` (optional): columns `gene,loeuf[,pli]`; annotates Tier A/B genes in the report.
+
+## Run gates the data must satisfy (Amendment 1 C10)
+
+- Synonymous control: `syn` discovery rows must number >= 10,000 and cover >= 90% of the (gene, trait) pairs that have a `plof` discovery row, else controls_not_evaluable (KILL).
+- Replication-sign control: the independent replication cohort should carry `plof` rows for `hypercholesterolemia` for PCSK9 (must be negative) and LDLR (must be positive). At least one must exist; every one present must hold. The adapter must guarantee the LoF carrier-allele sign convention (A1FREQ <= 0.5 guard).
+- A data directory must not mix `synthetic*` sources with real ones; the run refuses.
+- The config sha256 is pinned in `src/protscan/schema.py`; any other config is stamped NON-PREREGISTERED and the CLI exits 2.
 
 ## Trait names
 

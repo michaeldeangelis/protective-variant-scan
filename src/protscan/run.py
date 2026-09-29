@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from . import controls, report, stats, tiering
-from .schema import Config, load_burden, load_config
+from .schema import PINNED_CONFIG_SHA256, Config, load_burden, load_config
 
 
 def _incumbent(data_dir: Path, cfg: Config, hits: pd.DataFrame, disc: pd.DataFrame) -> dict:
@@ -110,7 +110,7 @@ def run_pipeline(config_path, data_dir, out_path) -> dict:
     files, dropped = df.attrs["files"], df.attrs["dropped_nan_rows"]
 
     hits = tiering.build_hits(df, cfg)
-    ctrl = controls.run_controls(df, cfg)
+    ctrl = controls.run_controls(df, cfg, hits)
     disc = stats.discovery_hits(df, cfg)
     incumbent = _incumbent(data_dir, cfg, hits, disc)
 
@@ -130,13 +130,21 @@ def run_pipeline(config_path, data_dir, out_path) -> dict:
         return rows
 
     sources = {c: sorted(set(df.loc[df["cohort"] == c, "source"])) for c in sorted(set(df["cohort"]))}
+    synthetic = any(s.startswith("synthetic") for v in sources.values() for s in v)
+    matches = cfg.sha256 == PINNED_CONFIG_SHA256
+    verdict = decide(ctrl, hits)
+    verdict.update(
+        synthetic=synthetic, config_matches_ledger=matches,
+        label=verdict["verdict"] + (" [SYNTHETIC DATA]" if synthetic else "") + ("" if matches else " [NON-PREREGISTERED]"))
     results = {
         "ledger_entry": cfg.ledger_entry,
         "config_sha256": cfg.sha256,
+        "config_sha256_pinned": PINNED_CONFIG_SHA256,
+        "config_matches_ledger": matches,
         "data": {
             "dir": str(data_dir), "files": files, "n_rows": int(len(df)), "dropped_nan_rows": int(dropped),
             "sources": sources,
-            "synthetic": any(s.startswith("synthetic") for v in sources.values() for s in v),
+            "synthetic": synthetic,
             "traits_absent": _absent(df, cfg),
             "constraint_file": bool(constraint),
             "replication_sources_excluded": sorted(
@@ -151,7 +159,7 @@ def run_pipeline(config_path, data_dir, out_path) -> dict:
         "controls": ctrl,
         "rungs": _rungs(cfg, ctrl, disc, hits, incumbent),
         "tiers": {t: records(t) for t in "ABCD"},
-        "verdict": decide(ctrl, hits),
+        "verdict": verdict,
     }
 
     out = Path(out_path)

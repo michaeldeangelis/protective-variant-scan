@@ -1059,7 +1059,6 @@ def test_fuzz_tiers_match_independent_oracle(seed, cfg):
 
 
 # ---------------- documented gaps (xfail, non-strict): see reviews/review-1.md ----------------
-@pytest.mark.xfail(strict=False, reason="R-1: negative control has no minimum coverage; 3 synonymous rows validate the pipeline")
 def test_negative_control_must_cover_the_discovery_universe(cfg):
     rows = [R("PCSK9", "ldl", "plof", "discovery", good("ldl"), 1e-30),
             R("PCSK9", "coronary_disease", "plof", "discovery", good("coronary_disease"), 1e-4),
@@ -1070,7 +1069,6 @@ def test_negative_control_must_cover_the_discovery_universe(cfg):
     c = controls.run_controls(T(rows), cfg)
     assert c["valid"] is False
 
-@pytest.mark.xfail(strict=False, reason="R-3: any --config is accepted; verdict not tied to the preregistered constants")
 def test_edited_config_cannot_silently_produce_a_verdict(synth, tmp_path):
     text = CONFIG_PATH.read_text().replace("syn_hits_max: 0", "syn_hits_max: 3")
     assert "syn_hits_max: 3" in text
@@ -1251,7 +1249,6 @@ def test_c9_end_to_end_only_unscreened_lead_gene_gives_kill(base_frames, tmp_pat
     assert o_verdict == "KILL"
 
 
-@pytest.mark.xfail(strict=False, reason="R-2: no control covers the replication-side sign convention (see review-1)")
 def test_replication_sign_flip_is_detected_by_a_control_or_flag(synth, tmp_path):
     tables = synth.make_synthetic("pass", n_genes=N_GENES)
     rep = tables["burden_synthetic_replication"].copy()

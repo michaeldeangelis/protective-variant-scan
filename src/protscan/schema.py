@@ -15,6 +15,10 @@ COHORTS = ("discovery", "replication", "discovery_eur")
 DOMAINS = ("cognitive", "physical", "metabolic")
 
 
+# C10c: sha256 of the committed config/prereg.yaml. Changes only with a dated ledger entry.
+PINNED_CONFIG_SHA256 = "7507f535f0c4e01fd7c32d59411feace25659a6b1aa32d7216d118fc061d2db4"
+
+
 @dataclass(frozen=True)
 class Config:
     sha256: str
@@ -32,6 +36,9 @@ class Config:
     min_tradeoffs_screened: int
     lambda_gc_max: float
     syn_hits_max: int
+    syn_min_coverage: float
+    syn_min_rows: int
+    replication_sign: tuple
     positive_controls: tuple
     qualifying_domains: tuple
     lipid_genes: frozenset
@@ -93,6 +100,9 @@ def load_config(path) -> Config:
     min_screened = int(y["tradeoff_screen"]["min_tradeoffs_screened"])
     if not 1 <= min_screened <= len(tradeoff_sign):
         raise ValueError("tradeoff_screen.min_tradeoffs_screened must be between 1 and N_tradeoff")
+    for c in y["controls"]["replication_sign"]:
+        if c["expected_beta_sign"] not in (1, -1):
+            raise ValueError(f"replication_sign {c['id']}: expected_beta_sign must be +1 or -1")
     q = tuple(y["verdict"]["qualifying_domains"])
     if not set(q) <= set(DOMAINS):
         raise ValueError("verdict.qualifying_domains invalid")
@@ -113,6 +123,9 @@ def load_config(path) -> Config:
         min_tradeoffs_screened=min_screened,
         lambda_gc_max=float(y["controls"]["lambda_gc_max"]),
         syn_hits_max=int(y["controls"]["syn_hits_max"]),
+        syn_min_coverage=float(y["controls"]["syn_min_coverage"]),
+        syn_min_rows=int(y["controls"]["syn_min_rows"]),
+        replication_sign=tuple(y["controls"]["replication_sign"]),
         positive_controls=pos,
         qualifying_domains=q,
         lipid_genes=frozenset(g.upper() for g in y["verdict"]["lipid_pathway_genes"]),
@@ -138,7 +151,7 @@ def validate(df: pd.DataFrame) -> pd.DataFrame:
     if bad:
         raise ValueError(f"unknown cohort values: {bad}")
     n0 = len(df)
-    df = df.dropna(subset=["beta", "se", "p"])
+    df = df.dropna(subset=["beta", "p"])          # se may be undefined (beta = 0 or p = 1 rows, C10d)
     dropped = n0 - len(df)
     if ((df["p"] < 0) | (df["p"] > 1)).any():
         raise ValueError("p outside [0, 1]")
@@ -159,5 +172,9 @@ def load_burden(data_dir) -> pd.DataFrame:
     if not files:
         raise FileNotFoundError(f"no burden*.csv[.gz] files in {data_dir}")
     df = validate(pd.concat([pd.read_csv(f, dtype={"gene": str, "trait": str}) for f in files], ignore_index=True))
+    synth = {x for x in df["source"].astype(str).unique() if x.lower().startswith("synthetic")}
+    real = set(df["source"].astype(str).unique()) - synth
+    if synth and real:
+        raise ValueError(f"{data_dir} mixes synthetic sources {sorted(synth)} with non-synthetic {sorted(real)}; refusing to run")
     df.attrs["files"] = [f.name for f in files]
     return df

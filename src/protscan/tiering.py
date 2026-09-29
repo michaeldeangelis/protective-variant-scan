@@ -25,7 +25,7 @@ def build_hits(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
     hits = stats.discovery_hits(df, cfg)
     if hits.empty:
         cols = ["gene", "trait", "beta", "se", "p", "n_carriers", "domain", "rep_status", "rep_trait", "rep_beta",
-                "rep_p_onesided", "adverse", "n_tradeoff_tested", "tradeoff_unscreened", "mask_status", "eur_status", "tier",
+                "rep_p_onesided", "adverse", "n_tradeoff_tested", "tradeoff_unscreened", "harmful_panel", "mask_status", "eur_status", "tier",
                 "lipid_gene", "qualifies"]
         return pd.DataFrame(columns=cols)
     hits = hits.join(stats.replication_status(hits, df, cfg))
@@ -35,6 +35,8 @@ def build_hits(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
     hits["domain"] = hits["trait"].map(cfg.panel_domain)
     hits["adverse"] = hits["gene"].map(adv)
     hits["n_tradeoff_tested"] = hits["gene"].map(tested)
+    hp = stats.harmful_panel_hits(genes, df, cfg)
+    hits["harmful_panel"] = [[h for h in hp[g] if h["trait"] != tr] for g, tr in zip(hits["gene"], hits["trait"])]
     hits["tradeoff_unscreened"] = hits["n_tradeoff_tested"] < cfg.min_tradeoffs_screened
     hits["mask_status"] = stats.mask_status(hits, df, cfg)
     hits["eur_status"] = stats.eur_status(hits, df, cfg)

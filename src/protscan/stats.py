@@ -96,10 +96,24 @@ def adverse_tradeoffs(genes, df: pd.DataFrame, cfg: Config) -> dict:
 
 
 def tradeoff_tested(genes, df: pd.DataFrame, cfg: Config) -> dict:
-    r = df[(df["mask"] == "plof") & (df["cohort"].isin(["discovery", "replication"]))
-           & (df["trait"].isin(cfg.tradeoff)) & (df["gene"].isin(set(genes)))]
+    """Distinct trade-off outcomes screened per gene: plof discovery rows plus allow-listed independent replication
+    rows only (C10g); untrusted replication rows do not count toward the C1/C9 minimum."""
+    genes = set(genes)
+    r = pd.concat([_rows(df, "discovery", "plof"), independent_replication(df, cfg)])
+    r = r[r["trait"].isin(cfg.tradeoff) & r["gene"].isin(genes)]
     n = r.groupby("gene")["trait"].nunique()
     return {g: int(n.get(g, 0)) for g in genes}
+
+
+def harmful_panel_hits(genes, df: pd.DataFrame, cfg: Config) -> dict:
+    """Informational (C10e): gene -> panel traits with a discovery-threshold association in the HARMFUL direction."""
+    r = _rows(df, "discovery", "plof")
+    r = r[r["trait"].isin(cfg.panel) & r["gene"].isin(set(genes)) & (r["p"] < cfg.discovery_p)]
+    r = r[r["beta"] * r["trait"].map(cfg.panel_sign) < 0]
+    out = {g: [] for g in genes}
+    for row in r.itertuples():
+        out[row.gene].append({"trait": row.trait, "beta": float(row.beta), "p": float(row.p)})
+    return out
 
 
 def mask_status(hits: pd.DataFrame, df: pd.DataFrame, cfg: Config) -> list:
