@@ -689,6 +689,8 @@ def oracle(df):
     for (g, t), letter in tiers.items():
         if g in MIN_LIPID or L_PANEL[t][0] not in ("cognitive", "physical"):
             continue
+        if len(screened.get(g, ())) < L_MIN_TRADEOFFS_SCREENED:      # C9: LEAD/PASS need >= 5 outcomes screened
+            continue
         if (g, t) in dmd and oracle_beneficial(dmd[(g, t)], L_PANEL[t][1]):
             qual.append(letter)
     if not ok:
@@ -1219,3 +1221,31 @@ def test_c4_unknown_replication_source_is_excluded_and_listed(base_frames, tmp_p
     res, _ = mutated_run(base_frames["pass"], edit, tmp_path)
     assert res["verdict"]["verdict"] == "LEAD"
     assert "mystery_biobank_burden" in res["data"]["replication_sources_excluded"]
+
+
+# ---------------- C9: the screening minimum also gates LEAD ----------------
+@pytest.mark.parametrize("n,counts", [(0, False), (4, False), (5, True), (9, True)])
+def test_c9_tier_B_gene_counts_toward_lead_only_if_five_outcomes_screened(n, counts, cfg):
+    from protscan.run import decide
+    rows = hit_rows("GA", "fluid_intelligence")
+    for t in L_TRADEOFF[:n]:
+        rows.append(R("GA", t, "plof", "discovery", 0.01, 0.5))
+    hits = tiering.build_hits(T(rows), cfg)
+    assert list(hits["tier"]) == ["B"]
+    assert bool(hits["qualifies"].iloc[0]) is counts
+    v = decide(CTRL_OK, hits)
+    assert v["verdict"] == ("LEAD" if counts else "KILL")
+    assert v["pass_genes"] == []
+
+
+def test_c9_end_to_end_only_unscreened_lead_gene_gives_kill(base_frames, tmp_path):
+    def edit(df):
+        keep = L_TRADEOFF[:4]
+        sel = (df["gene"] == "SYNLEAD1") & df["trait"].isin(L_TRADEOFF) & (~df["trait"].isin(keep))
+        df.drop(df.index[sel], inplace=True)
+    res, df = mutated_run(base_frames["lead"], edit, tmp_path)
+    assert result_tiers(res)[("SYNLEAD1", "fluid_intelligence")] == "B"
+    assert res["controls"]["valid"] is True
+    assert res["verdict"]["verdict"] == "KILL" and res["verdict"]["lead_genes"] == []
+    _, _, o_verdict = oracle(df)
+    assert o_verdict == "KILL"
