@@ -40,6 +40,7 @@ def build_hits(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
     hits["eur_status"] = stats.eur_status(hits, df, cfg)
     hits["tier"] = [assign_tier(a, s, u) for a, s, u in zip(hits["adverse"], hits["rep_status"], hits["tradeoff_unscreened"])]
     hits["lipid_gene"] = hits["gene"].isin(cfg.lipid_genes)
-    # verdict qualification: non-lipid gene, qualifying trait domain, both masks consistent
-    hits["qualifies"] = (~hits["lipid_gene"]) & hits["domain"].isin(cfg.qualifying_domains) & (hits["mask_status"] == "consistent")
+    # verdict qualification: non-lipid gene, qualifying trait domain, both masks consistent, and (C9) enough trade-offs screened
+    hits["qualifies"] = ((~hits["lipid_gene"]) & hits["domain"].isin(cfg.qualifying_domains)
+                         & (hits["mask_status"] == "consistent") & ~hits["tradeoff_unscreened"])
     return hits.sort_values(["tier", "p"]).reset_index(drop=True)

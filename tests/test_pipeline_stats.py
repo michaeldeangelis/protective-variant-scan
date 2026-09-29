@@ -126,6 +126,7 @@ def test_qualifies_excludes_lipid_domain_and_mask_missing():
         row("X1", "bmi"), row("X1", "bmi", mask="dmis"),               # metabolic domain
         row("X2", "systolic_bp"),                                       # dmis missing
         row("X3", "systolic_bp"), row("X3", "systolic_bp", mask="dmis"),
+        *[row(g, t, beta=0.01, p=0.9) for g in ("LPL", "X1", "X2", "X3") for t in list(cfg.tradeoff)[:5]],
     )
     h = tiering.build_hits(df, cfg).set_index("gene")
     assert not h.loc["LPL", "qualifies"] and h.loc["LPL", "lipid_gene"]

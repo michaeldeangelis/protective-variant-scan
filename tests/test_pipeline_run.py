@@ -219,6 +219,8 @@ def test_unscreened_scenario_caps_replicated_gene_at_tier_B(make):
     b = [x for x in r["tiers"]["B"] if x["gene"] == "SYNPASS1"]
     assert b and b[0]["tradeoff_unscreened"] and b[0]["n_tradeoff_tested"] == 4 and b[0]["rep_status"] == "replicated"
     assert "SYNPASS1" not in genes(r, "A")
-    assert r["verdict"]["verdict"] == "LEAD" and r["verdict"]["lead_genes"] == ["SYNPASS1"]
+    assert not b[0]["qualifies"]                      # C9: listed as Tier B, trade-off unscreened; not a lead
+    assert r["verdict"]["verdict"] == "KILL" and r["verdict"]["lead_genes"] == [] and r["verdict"]["pass_genes"] == []
+    assert r["controls"]["valid"] and "neither PASS nor LEAD" in r["verdict"]["reason"]
     assert r["thresholds"]["min_tradeoffs_screened"] == 5
     assert "trade-off unscreened" in (Path(d) / "out" / "report.md").read_text()

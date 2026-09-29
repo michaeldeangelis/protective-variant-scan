@@ -83,3 +83,36 @@ LIPID_PATHWAY_GENES_4073B89 = [
 def test_lipid_pathway_list_pinned_to_4073b89():
     assert cfg.lipid_genes == frozenset(LIPID_PATHWAY_GENES_4073B89)
     assert len(LIPID_PATHWAY_GENES_4073B89) == 24
+
+
+# C9: the C1 minimum applies to LEAD as well; PASS is unaffected (Tier A already needs it)
+def _verdict_k(trait, k, with_replication=False):
+    rows = _gene_rows("XG", trait, with_replication)
+    keep = set(list(cfg.tradeoff)[:k])
+    rows = [r for r in rows if r["trait"] not in cfg.tradeoff or r["trait"] in keep]
+    hits = tiering.build_hits(validate(pd.DataFrame(rows)), cfg)
+    return decide(VALID, hits), hits.iloc[0]
+
+
+@pytest.mark.parametrize("trait", ["fluid_intelligence", "fev1"])
+@pytest.mark.parametrize("k,lead", [(0, False), (4, False), (5, True), (9, True)])
+def test_lead_needs_min_tradeoffs_screened(trait, k, lead):
+    v, h = _verdict_k(trait, k)
+    assert h["tier"] == "B" and bool(h["qualifies"]) == lead
+    assert v["verdict"] == ("LEAD" if lead else "KILL")
+    assert v["lead_genes"] == (["XG"] if lead else [])
+
+
+@pytest.mark.parametrize("k,verdict,tier", [(4, "KILL", "B"), (5, "PASS", "A"), (9, "PASS", "A")])
+def test_pass_boundary_on_tradeoffs_screened(k, verdict, tier):
+    v, h = _verdict_k("systolic_bp", k, with_replication=True)
+    assert (v["verdict"], h["tier"]) == (verdict, tier)
+
+
+def test_unscreened_lead_does_not_hide_a_screened_lead():
+    rows = _gene_rows("UNSCR", "fluid_intelligence", False)
+    rows = [r for r in rows if r["trait"] not in list(cfg.tradeoff)[2:]]
+    rows += _gene_rows("SCR", "numeric_memory", False)
+    hits = tiering.build_hits(validate(pd.DataFrame(rows)), cfg)
+    v = decide(VALID, hits)
+    assert v["verdict"] == "LEAD" and v["lead_genes"] == ["SCR"]

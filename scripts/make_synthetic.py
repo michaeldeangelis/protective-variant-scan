@@ -11,7 +11,8 @@ Scenarios (expected verdict on the default config):
   broken_positive   KILL   PCSK9 effects removed
   broken_lambda     KILL   synonymous z-scores inflated (lambda_GC ~1.7)
   broken_syn_hit    KILL   one synonymous-mask gene at the discovery threshold, beneficial direction
-  unscreened        LEAD   SYNPASS1 replicates but only 4 of 9 trade-offs are screened: capped at Tier B (C1)
+  unscreened        KILL   SYNPASS1 replicates but only 4 of 9 trade-offs are screened: capped at Tier B (C1),
+                           and Tier B unscreened does not count toward LEAD (C9); it is the only candidate
 """
 from __future__ import annotations
 
