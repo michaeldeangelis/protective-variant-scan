@@ -61,6 +61,14 @@ L_LIPID_GENES = set("""PCSK9 ANGPTL3 ANGPTL4 ANGPTL8 APOC3 APOA5 APOB APOE LDLR 
 NPC1L1 ABCG5 ABCG8 HMGCR SORT1 LIPG GPIHBP1 LMF1 ANGPTL1""".split())   # C3: frozen at commit 4073b89
 L_DISCOVERY_P_ACCEPTED = 1.9e-7                       # C4: accepted as implemented (not 1.923e-7)
 L_INDEP_TOKENS = ("finngen", "all_of_us", "allofus", "synthetic_replication")   # C4 allow list (+ fixture token)
+# C10 (lead decisions on review-1)
+L_SYN_MIN_COVERAGE = 0.90                             # C10a: syn rows cover >= 90 percent of plof (gene, trait) pairs
+L_SYN_MIN_ROWS = 10000                                # C10a: and number >= 10,000
+L_REP_SIGN = (("PCSK9", "hypercholesterolemia", -1), ("LDLR", "hypercholesterolemia", +1))   # C10b: established biology
+L_A1FREQ_MAX = 0.5                                    # C10b adapter guard
+# Reviewer's own pin of config/prereg.yaml (second, independent copy of schema.PINNED_CONFIG_SHA256, C10c).
+# Update only together with a dated ledger entry.
+L_CONFIG_SHA256 = "7507f535f0c4e01fd7c32d59411feace25659a6b1aa32d7216d118fc061d2db4"
 
 
 # Tier letters (ledger):
@@ -163,6 +171,10 @@ def test_config_controls(cfg_yaml):
     c = cfg_yaml["controls"]
     assert c["lambda_gc_max"] == L_LAMBDA_GC_MAX
     assert c["syn_hits_max"] == L_SYN_HITS_MAX
+    assert c["syn_min_coverage"] == L_SYN_MIN_COVERAGE                    # C10a
+    assert c["syn_min_rows"] == L_SYN_MIN_ROWS
+    got = tuple((x["gene"], x["trait"], x["expected_beta_sign"]) for x in c["replication_sign"])
+    assert got == L_REP_SIGN, got                                          # C10b
     pos = c["positive"]
     genesets = [tuple(sorted(p["genes"])) for p in pos]
     assert ("PCSK9",) in genesets
@@ -173,6 +185,20 @@ def test_config_controls(cfg_yaml):
     assert cad and cad[0]["at_discovery_threshold"] is False   # coronary-disease direction protective
     lip = [p for p in pos if sorted(p["genes"]) == ["ANGPTL4", "APOC3"]]
     assert lip and lip[0]["at_discovery_threshold"] is True
+
+
+def test_config_file_bytes_match_reviewer_pin_and_code_pin():
+    import hashlib
+    from protscan import schema
+    assert hashlib.sha256(CONFIG_PATH.read_bytes()).hexdigest() == L_CONFIG_SHA256
+    assert schema.PINNED_CONFIG_SHA256 == L_CONFIG_SHA256
+
+
+def test_pyproject_declares_runtime_dependencies():
+    text = (ROOT / "pyproject.toml").read_text()
+    dep_line = [ln for ln in text.splitlines() if ln.startswith("dependencies")][0]
+    for pkg in ("pandas", "numpy", "scipy", "pyyaml", "requests", "pyarrow"):
+        assert '"%s"' % pkg in dep_line, pkg
 
 
 def test_config_masks_and_permutation_retired(cfg_yaml):
@@ -199,6 +225,7 @@ def test_config_loads_via_schema_and_derives_thresholds():
     assert c.replication_p == L_REPL_ONE_SIDED_P
     assert c.lambda_gc_max == L_LAMBDA_GC_MAX
     assert c.syn_hits_max == 0
+    assert c.syn_min_coverage == L_SYN_MIN_COVERAGE and c.syn_min_rows == L_SYN_MIN_ROWS
     for t, (_, s) in L_PANEL.items():
         assert c.sign(t) == s
     for t in L_TRADEOFF:
@@ -432,22 +459,31 @@ def test_synonymous_only_gene_never_receives_a_tier(cfg):
 CHI2_MEDIAN = float(chi2.ppf(0.5, 1))
 
 
-def baseline_null(n_genes=150, seed=7):
-    """Null discovery table (plof/dmis/syn, N(0,1) z-scores) plus the lipid positive controls."""
+def baseline_null(n_genes=500, seed=7):
+    """Null discovery table (plof/dmis/syn, N(0,1) z-scores) plus the lipid positive controls and the
+    replication-sign control rows. 500 genes x 23 traits = 11,500 synonymous rows (C10a floor is 10,000)."""
     rng = np.random.default_rng(seed)
     genes = ["NULLG%04d" % i for i in range(n_genes)]
     traits = sorted(L_PANEL) + list(L_TRADEOFF) + list(CTRL_TRAITS)
-    rows = []
+    g_col, t_col, m_col = [], [], []
     for g in genes:
         for t in traits:
             for m in ("plof", "dmis", "syn"):
-                z = float(rng.standard_normal())
-                rows.append(R(g, t, m, "discovery", z * 0.1, float(2 * norm.sf(abs(z)))))
-    rows.append(R("PCSK9", "ldl", "plof", "discovery", good("ldl"), 1e-30))
-    rows.append(R("PCSK9", "coronary_disease", "plof", "discovery", good("coronary_disease"), 1e-6))
-    rows.append(R("ANGPTL4", "triglycerides", "plof", "discovery", good("triglycerides"), 1e-20))
-    rows.append(R("APOC3", "triglycerides", "plof", "discovery", good("triglycerides"), 1e-20))
-    return pd.DataFrame(rows, columns=COLUMNS)
+                g_col.append(g)
+                t_col.append(t)
+                m_col.append(m)
+    z = rng.standard_normal(len(g_col))
+    df = pd.DataFrame(dict(gene=g_col, trait=t_col, mask=m_col, cohort="discovery", beta=z * 0.1, se=0.1,
+                           p=2 * norm.sf(np.abs(z)), n_carriers=100, n_total=400000, source=DISC_SRC))
+    extra = [
+        R("PCSK9", "ldl", "plof", "discovery", good("ldl"), 1e-30),
+        R("PCSK9", "coronary_disease", "plof", "discovery", good("coronary_disease"), 1e-6),
+        R("ANGPTL4", "triglycerides", "plof", "discovery", good("triglycerides"), 1e-20),
+        R("APOC3", "triglycerides", "plof", "discovery", good("triglycerides"), 1e-20),
+        R("PCSK9", "hypercholesterolemia", "plof", "replication", -0.8, 1e-6),      # C10b: PCSK9 lowers risk
+        R("LDLR", "hypercholesterolemia", "plof", "replication", +0.9, 1e-8),       # C10b: LDLR raises risk
+    ]
+    return pd.concat([df[COLUMNS], pd.DataFrame(extra, columns=COLUMNS)], ignore_index=True)
 
 
 @pytest.fixture(scope="module")
@@ -578,7 +614,7 @@ import subprocess
 import sys
 
 MIN_LIPID = set(["PCSK9", "ANGPTL4", "APOC3", "APOB", "LDLR", "ANGPTL3", "LPL", "LPA"])
-N_GENES = 400
+N_GENES = 500      # synthetic universe must exceed the C10a floor of 10,000 synonymous rows
 
 
 def _load_synth():
@@ -676,8 +712,19 @@ def oracle(df):
         return x.iloc[0] if len(x) else None
 
     ok = lam < L_LAMBDA_GC_MAX and len(syn_hits) == 0
+    plof_pairs = set(zip(d["gene"], d["trait"]))
+    syn_pairs = set(zip(syn["gene"], syn["trait"]))
+    coverage = (len(plof_pairs.intersection(syn_pairs)) / len(plof_pairs)) if plof_pairs else 0.0
+    ok = ok and len(syn) >= L_SYN_MIN_ROWS and coverage >= L_SYN_MIN_COVERAGE                    # C10a
+    signs = []
+    for g, tr, want in L_REP_SIGN:                                                               # C10b
+        hit_rows_ = rep[(rep["gene"] == g) & (rep["trait"] == tr)]
+        if len(hit_rows_):
+            signs.append(hit_rows_.iloc[0].beta * want > 0)
+    ok = ok and len(signs) >= 1 and all(signs)
     x = rowof("PCSK9", "ldl")
     ok = ok and x is not None and oracle_discovery(x.beta, x.p, -1)
+    ok = ok and ("PCSK9", "ldl") in tiers and tiers[("PCSK9", "ldl")] != "C"                   # C10g via tier path
     x = rowof("PCSK9", "coronary_disease")
     ok = ok and x is not None and x.beta < 0
     tg = [rowof(g, "triglycerides") for g in ("ANGPTL4", "APOC3")]
@@ -718,7 +765,8 @@ def result_tiers(res):
 def scenario_runs(synth, tmp_path_factory):
     """Each synthetic scenario written to disk and run through the real CLI once."""
     runs = dict()
-    for name in ("pass", "lead", "nolead", "broken_positive", "broken_lambda", "broken_syn_hit"):
+    for name in ("pass", "lead", "nolead", "broken_positive", "broken_lambda", "broken_syn_hit", "broken_rep_sign",
+                 "unscreened"):
         d = tmp_path_factory.mktemp("scn_" + name)
         tables = synth.make_synthetic(name, n_genes=N_GENES)
         write_tables(tables, d)
@@ -729,7 +777,8 @@ def scenario_runs(synth, tmp_path_factory):
 
 @pytest.mark.parametrize("name,verdict", [("pass", "PASS"), ("lead", "LEAD"), ("nolead", "KILL"),
                                           ("broken_positive", "KILL"), ("broken_lambda", "KILL"),
-                                          ("broken_syn_hit", "KILL")])
+                                          ("broken_syn_hit", "KILL"), ("broken_rep_sign", "KILL"),
+                                          ("unscreened", "KILL")])
 def test_scenario_verdict_matches_ledger_rules(scenario_runs, name, verdict):
     tables, res, _ = scenario_runs[name]
     assert res["verdict"]["verdict"] == verdict
@@ -861,8 +910,25 @@ def edit_syn_hit(df):
     setrow(df, "SYNPASS1", "hand_grip_strength", "syn", "discovery", z=zgood("hand_grip_strength", 7))
 
 
+def edit_flip_rep_sign_controls(df):
+    setrow(df, "PCSK9", "hypercholesterolemia", "plof", "replication", z=+5)
+    setrow(df, "LDLR", "hypercholesterolemia", "plof", "replication", z=-5)
+
+
+def edit_drop_rep_sign_rows(df):
+    sel = (df["cohort"] == "replication") & df["gene"].isin(["PCSK9", "LDLR"]) & (df["trait"] == "hypercholesterolemia")
+    df.drop(df.index[sel], inplace=True)
+
+
+def edit_thin_synonymous(df):
+    """Keep only 5 percent of the synonymous rows: coverage and row floor both violated."""
+    syn = df.index[df["mask"] == "syn"]
+    df.drop(syn[int(len(syn) * 0.05):], inplace=True)
+
+
 @pytest.mark.parametrize("edit", [edit_flip_pcsk9_ldl, edit_pcsk9_ldl_weak, edit_drop_tg_controls, edit_flip_both_tg,
-                                  edit_pcsk9_cad_flip, edit_lambda_high, edit_syn_hit],
+                                  edit_pcsk9_cad_flip, edit_lambda_high, edit_syn_hit, edit_flip_rep_sign_controls,
+                                  edit_drop_rep_sign_rows, edit_thin_synonymous],
                          ids=lambda f: f.__name__)
 def test_breaking_any_control_yields_kill_even_with_tier_A_gene(edit, base_frames, tmp_path):
     res, df = mutated_run(base_frames["pass"], edit, tmp_path)
@@ -901,12 +967,14 @@ def _sbp_rep(p):
 
 
 def edit_ukb_relabel(df):
-    sel = df["cohort"] == "replication"
-    df.loc[sel, "source"] = "genebass_hypertension_lookup"
+    """Only the candidate gene's replication rows come from a UKB-derived source (controls stay evaluable)."""
+    sel = (df["cohort"] == "replication") & (df["gene"] == "SYNPASS1")
+    df.loc[sel, "source"] = "synthetic_genebass_hypertension_lookup"   # synthetic prefix: no real/synthetic mix
 
 
 def edit_no_replication(df):
-    df.drop(df.index[df["cohort"] == "replication"], inplace=True)
+    """Only the candidate gene is missing from the replication cohort (controls stay evaluable)."""
+    df.drop(df.index[(df["cohort"] == "replication") & (df["gene"] == "SYNPASS1")], inplace=True)
 
 
 def edit_dmis_flip(df):
@@ -940,7 +1008,7 @@ PASS_BLOCKERS = [
     ("discovery_p_2e-7", edit_sbp_p_just_above_threshold),
     ("discovery_harmful_direction", edit_sbp_harmful),
     ("lipid_pathway_gene_APOB", _rename_gene("SYNPASS1", "APOB")),
-    ("lipid_pathway_gene_LDLR", _rename_gene("SYNPASS1", "LDLR")),
+    ("lipid_pathway_gene_LPL", _rename_gene("SYNPASS1", "LPL")),
 ]
 
 
@@ -971,7 +1039,7 @@ def test_same_trait_replication_for_cognitive_trait_still_lead_not_pass(base_fra
         extra = df[(df["gene"] == "SYNLEAD1") & (df["trait"] == "fluid_intelligence")
                    & (df["mask"] == "plof") & (df["cohort"] == "discovery")].copy()
         extra["cohort"] = "replication"
-        extra["source"] = "finngen_r13"
+        extra["source"] = "synthetic_replication"
         extra["p"] = 1e-12
         df.loc[df.index.max() + 1] = extra.iloc[0]
     res, df = mutated_run(base_frames["lead"], edit, tmp_path)
@@ -1056,32 +1124,6 @@ def test_fuzz_tiers_match_independent_oracle(seed, cfg):
     got = dict(((r.gene, r.trait), r.tier) for r in hits.itertuples())
     _, want, _ = oracle(df)
     assert got == want
-
-
-# ---------------- documented gaps (xfail, non-strict): see reviews/review-1.md ----------------
-def test_negative_control_must_cover_the_discovery_universe(cfg):
-    rows = [R("PCSK9", "ldl", "plof", "discovery", good("ldl"), 1e-30),
-            R("PCSK9", "coronary_disease", "plof", "discovery", good("coronary_disease"), 1e-4),
-            R("APOC3", "triglycerides", "plof", "discovery", good("triglycerides"), 1e-30),
-            R("PCSK9", "ldl", "syn", "discovery", 0.001, 0.6),
-            R("G1", "ldl", "syn", "discovery", 0.001, 0.5),
-            R("G2", "bmi", "syn", "discovery", 0.001, 0.4)]
-    c = controls.run_controls(T(rows), cfg)
-    assert c["valid"] is False
-
-def test_edited_config_cannot_silently_produce_a_verdict(synth, tmp_path):
-    text = CONFIG_PATH.read_text().replace("syn_hits_max: 0", "syn_hits_max: 3")
-    assert "syn_hits_max: 3" in text
-    cfg_copy = tmp_path / "loose.yaml"
-    cfg_copy.write_text(text)
-    d = tmp_path / "data"
-    write_tables(synth.make_synthetic("broken_syn_hit", n_genes=N_GENES), d)
-    from protscan.run import run_pipeline
-    try:
-        res = run_pipeline(cfg_copy, d, tmp_path / "o" / "r.json")
-    except Exception:
-        return
-    assert res["verdict"]["verdict"] == "KILL" or res.get("config_matches_ledger") is False
 
 
 # ======================================================================================
@@ -1214,11 +1256,33 @@ def test_c4_pcsk9_coronary_control_is_direction_only(null_table, cfg):
 
 def test_c4_unknown_replication_source_is_excluded_and_listed(base_frames, tmp_path):
     def edit(df):
-        sel = df["cohort"] == "replication"
-        df.loc[sel, "source"] = "mystery_biobank_burden"
+        sel = (df["cohort"] == "replication") & (df["gene"] == "SYNPASS1")
+        df.loc[sel, "source"] = "synthetic_mystery_biobank_burden"
     res, _ = mutated_run(base_frames["pass"], edit, tmp_path)
+    assert res["controls"]["valid"] is True
     assert res["verdict"]["verdict"] == "LEAD"
-    assert "mystery_biobank_burden" in res["data"]["replication_sources_excluded"]
+    assert "synthetic_mystery_biobank_burden" in res["data"]["replication_sources_excluded"]
+
+
+@pytest.mark.parametrize("label", ["synthetic_mystery_biobank_burden", "synthetic_genebass_lookup", "synthetic_azphewas_v1"])
+def test_c10b_whole_replication_cohort_from_untrusted_source_gives_kill_not_evaluable(label, base_frames, tmp_path):
+    """No independent replication rows at all: the replication-sign control cannot run, so KILL (C10b)."""
+    def edit(df):
+        df.loc[df["cohort"] == "replication", "source"] = label
+    res, _ = mutated_run(base_frames["pass"], edit, tmp_path)
+    assert res["verdict"]["verdict"] == "KILL"
+    assert res["verdict"]["reason"].startswith("controls_not_evaluable")
+    assert "replication_sign" in res["controls"]["not_run"]
+    assert res["controls"]["replication_sign"]["status"] == "NOT RUN"
+    assert result_tiers(res).get(("SYNPASS1", "systolic_bp")) == "B"        # never Tier A without independent rows
+    assert label in res["data"]["replication_sources_excluded"]
+
+
+def test_c10b_no_replication_cohort_at_all_gives_kill(base_frames, tmp_path):
+    def edit(df):
+        df.drop(df.index[df["cohort"] == "replication"], inplace=True)
+    res, _ = mutated_run(base_frames["pass"], edit, tmp_path)
+    assert res["verdict"]["verdict"] == "KILL" and "replication_sign" in res["controls"]["not_run"]
 
 
 # ---------------- C9: the screening minimum also gates LEAD ----------------
@@ -1249,14 +1313,379 @@ def test_c9_end_to_end_only_unscreened_lead_gene_gives_kill(base_frames, tmp_pat
     assert o_verdict == "KILL"
 
 
-def test_replication_sign_flip_is_detected_by_a_control_or_flag(synth, tmp_path):
+# ======================================================================================
+# (e) C10: closure of review-1 findings R-1 (a), R-2 (b), R-3 (c), R-9 (d), R-7 (e), R-8 (f), R-4/R-6/R-10/R-11 (g)
+# ======================================================================================
+def neg_of(df, cfg):
+    return controls.run_controls(validate(df), cfg)["negative_synonymous"]
+
+
+# ---------------- C10a: synonymous universe size and coverage ----------------
+def test_c10a_three_synonymous_rows_are_not_evaluable_and_give_kill(cfg):
+    """R-1 probe: 3 synonymous rows used to validate the pipeline. Now NOT RUN -> KILL controls_not_evaluable."""
+    from protscan.run import decide
+    rows = [R("PCSK9", "ldl", "plof", "discovery", good("ldl"), 1e-30),
+            R("PCSK9", "coronary_disease", "plof", "discovery", good("coronary_disease"), 1e-4),
+            R("APOC3", "triglycerides", "plof", "discovery", good("triglycerides"), 1e-30),
+            R("PCSK9", "hypercholesterolemia", "plof", "replication", -0.8, 1e-6),
+            R("PCSK9", "ldl", "syn", "discovery", 0.001, 0.6),
+            R("G1", "ldl", "syn", "discovery", 0.001, 0.5),
+            R("G2", "bmi", "syn", "discovery", 0.001, 0.4)]
+    df = T(rows)
+    c = controls.run_controls(df, cfg)
+    n = c["negative_synonymous"]
+    assert n["status"] == "NOT RUN" and n["n_rows"] == 3 and "rows" in n["reason"]
+    assert "negative_synonymous" in c["not_run"] and c["valid"] is False
+    hits = tiering.build_hits(df, cfg)
+    v = decide(c, hits)
+    assert v["verdict"] == "KILL" and v["reason"].startswith("controls_not_evaluable")
+
+
+@pytest.mark.parametrize("n_genes,evaluable", [(434, False), (435, True)])
+def test_c10a_row_floor_is_10000_synonymous_rows(n_genes, evaluable, cfg):
+    df = baseline_null(n_genes=n_genes)
+    n = neg_of(df, cfg)
+    n_syn = int((df["mask"] == "syn").sum())
+    assert (n_syn >= L_SYN_MIN_ROWS) == evaluable, n_syn
+    assert (n["status"] != "NOT RUN") == evaluable
+
+
+def _drop_syn_rows(df, k):
+    """Remove the synonymous rows of the first k (gene, trait) pairs of the null block (plof rows stay)."""
+    syn_idx = df.index[(df["mask"] == "syn")][:k]
+    return df.drop(syn_idx)
+
+
+def test_c10a_coverage_boundary_is_90_percent_of_plof_pairs(null_table, cfg):
+    disc = null_table[null_table["cohort"] == "discovery"]
+    n_plof = int((disc["mask"] == "plof").sum())              # includes the 4 control pairs without synonymous rows
+    n_syn = int((disc["mask"] == "syn").sum())
+    k_ok = n_syn - int(np.ceil(L_SYN_MIN_COVERAGE * n_plof - 1e-9))   # drop so coverage sits exactly at the minimum
+    assert k_ok > 0
+    ok = neg_of(_drop_syn_rows(null_table, k_ok), cfg)
+    assert ok["status"] == "OK", ok.get("reason")
+    assert ok["coverage"] >= L_SYN_MIN_COVERAGE - 1e-12
+    low = neg_of(_drop_syn_rows(null_table, k_ok + 1), cfg)
+    assert low["status"] == "NOT RUN" and "coverage" in low["reason"]
+    assert low["coverage"] < L_SYN_MIN_COVERAGE
+
+
+def test_c10a_coverage_is_measured_against_plof_pairs_not_row_count(null_table, cfg):
+    """Plenty of synonymous rows, but for the wrong (gene, trait) pairs: rows above 10,000 yet coverage far below 90 percent."""
+    df = null_table.copy()
+    plof_null = df.index[(df["mask"] == "plof") & df["gene"].str.startswith("NULLG")]
+    half = plof_null[: len(plof_null) // 2]
+    df.loc[half, "gene"] = "ORPHAN" + df.loc[half, "gene"]
+    n = neg_of(df, cfg)
+    assert (df["mask"] == "syn").sum() >= L_SYN_MIN_ROWS
+    assert n["status"] == "NOT RUN" and n["coverage"] < L_SYN_MIN_COVERAGE
+
+
+def test_c10a_no_plof_rows_means_not_evaluable(null_table, cfg):
+    df = null_table[null_table["mask"] != "plof"]
+    n = neg_of(df, cfg)
+    assert n["status"] == "NOT RUN" and n["coverage"] == 0.0
+
+
+@pytest.mark.xfail(strict=False, reason="R2-1: 90 percent coverage still allows the omitted 10 percent to be exactly the hit genes")
+def test_c10a_residual_selective_omission_of_hit_genes_is_detected(null_table, cfg):
+    df = null_table.copy()
+    hit = df.index[(df["gene"] == "NULLG0001") & (df["mask"] == "plof") & (df["trait"] == "ldl")]
+    df.loc[hit, "beta"] = good("ldl")
+    df.loc[hit, "p"] = 1e-12                                 # a discovery hit whose synonymous row is then withheld
+    df = df.drop(df.index[(df["gene"] == "NULLG0001") & (df["mask"] == "syn")])
+    c = controls.run_controls(validate(df), cfg)
+    assert c["negative_synonymous"]["status"] != "OK"
+
+
+# ---------------- C10b: replication-sign control ----------------
+def rs_of(df, cfg):
+    return controls.run_controls(validate(df), cfg)
+
+
+def drop_rows_df(df, gene, trait, cohort):
+    return df[~((df["gene"] == gene) & (df["trait"] == trait) & (df["cohort"] == cohort))].copy()
+
+
+def test_c10b_both_evaluable_and_correct_is_ok(null_table, cfg):
+    c = rs_of(null_table, cfg)
+    assert c["replication_sign"]["status"] == "OK" and c["valid"] is True
+    assert [k["status"] for k in c["replication_sign"]["checks"]] == ["OK", "OK"]
+
+
+@pytest.mark.parametrize("pcsk9_beta,ldlr_beta", [(+0.8, +0.9), (-0.8, -0.9), (+0.8, -0.9)])
+def test_c10b_any_evaluable_check_with_wrong_sign_fails_the_run(pcsk9_beta, ldlr_beta, null_table, cfg):
+    df = set_row(null_table, "PCSK9", "hypercholesterolemia", "plof", "replication", beta=pcsk9_beta)
+    df = set_row(df, "LDLR", "hypercholesterolemia", "plof", "replication", beta=ldlr_beta)
+    c = rs_of(df, cfg)
+    assert c["replication_sign"]["status"] == "FAIL" and c["valid"] is False
+    assert "replication_sign" in c["failed"]
+
+
+@pytest.mark.parametrize("gene,other", [("PCSK9", "LDLR"), ("LDLR", "PCSK9")])
+def test_c10b_one_evaluable_check_is_enough_but_must_hold(gene, other, null_table, cfg):
+    df = drop_rows_df(null_table, other, "hypercholesterolemia", "replication")
+    assert rs_of(df, cfg)["valid"] is True
+    want = dict((g, sgn) for g, _, sgn in L_REP_SIGN)[gene]
+    bad_df = set_row(df, gene, "hypercholesterolemia", "plof", "replication", beta=-want * 0.5)
+    c = rs_of(bad_df, cfg)
+    assert c["valid"] is False and "replication_sign" in c["failed"]
+
+
+def test_c10b_neither_evaluable_is_not_run_and_kills(null_table, cfg):
+    df = drop_rows_df(drop_rows_df(null_table, "PCSK9", "hypercholesterolemia", "replication"),
+                      "LDLR", "hypercholesterolemia", "replication")
+    c = rs_of(df, cfg)
+    assert c["replication_sign"]["status"] == "NOT RUN" and "replication_sign" in c["not_run"] and c["valid"] is False
+
+
+@pytest.mark.parametrize("src", ["genebass", "azphewas_v1", "mystery_biobank"])
+def test_c10b_control_rows_from_untrusted_sources_do_not_count(src, null_table, cfg):
+    df = null_table.copy()
+    df.loc[df["cohort"] == "replication", "source"] = src
+    assert rs_of(df, cfg)["replication_sign"]["status"] == "NOT RUN"
+
+
+def test_c10b_sign_is_direction_only_so_noise_can_pass_documented(null_table, cfg):
+    """Scope of the control (review-2 R2-3): the correct sign at p = 0.99 passes; only the sign convention is tested."""
+    df = set_row(null_table, "PCSK9", "hypercholesterolemia", "plof", "replication", beta=-0.001, p=0.99)
+    assert rs_of(df, cfg)["replication_sign"]["status"] == "OK"
+
+
+def test_c10b_end_to_end_flipped_replication_gives_kill_control_failed(synth, tmp_path):
+    """R-2 probe: every replication beta sign-flipped. Was PASS -> LEAD with controls valid. Now KILL, control failed."""
     tables = synth.make_synthetic("pass", n_genes=N_GENES)
     rep = tables["burden_synthetic_replication"].copy()
-    rep["beta"] = -rep["beta"]                       # simulate an adapter that reports the wrong allele's effect
+    rep["beta"] = -rep["beta"]
     tables["burden_synthetic_replication"] = rep
     d = tmp_path / "data"
     write_tables(tables, d)
     from protscan.run import run_pipeline
     res = run_pipeline(CONFIG_PATH, d, tmp_path / "o" / "r.json")
-    flagged = (res["controls"]["valid"] is False) or ("replication_sanity" in res["controls"])
-    assert flagged, "PASS silently became %s with controls valid" % res["verdict"]["verdict"]
+    assert res["controls"]["valid"] is False
+    assert res["controls"]["replication_sign"]["status"] == "FAIL"
+    assert res["controls"]["failed"] == ["replication_sign"]
+    assert [k["status"] for k in res["controls"]["replication_sign"]["checks"]] == ["FAIL", "FAIL"]
+    assert res["verdict"]["verdict"] == "KILL" and res["verdict"]["reason"].startswith("control_failed")
+
+
+# ---------------- C10b adapter guard: A1FREQ <= 0.5 ----------------
+def _finngen_raw(rows):
+    cols = ["PHENO", "ID", "A1FREQ", "N", "TEST", "BETA", "SE", "LOG10P"]
+    return pd.DataFrame(rows, columns=cols)
+
+
+def test_c10b_a1freq_guard_keeps_le_half_drops_gt_half_and_nan():
+    from protscan.adapters import finngen
+    assert finngen.A1FREQ_MAX == L_A1FREQ_MAX
+    raw = _finngen_raw([["E4_HYPERCHOL", "G1", 0.001, 1000, "ADD", -0.5, 0.1, 6.0],
+                        ["E4_HYPERCHOL", "G2", 0.5, 1000, "ADD", -0.5, 0.1, 6.0],
+                        ["E4_HYPERCHOL", "G3", 0.5001, 1000, "ADD", -0.5, 0.1, 6.0],
+                        ["E4_HYPERCHOL", "G4", 0.999, 1000, "ADD", -0.5, 0.1, 6.0],
+                        ["E4_HYPERCHOL", "G5", float("nan"), 1000, "ADD", -0.5, 0.1, 6.0]])
+    out = finngen.normalize_endpoint(raw, "E4_HYPERCHOL")
+    assert sorted(out["gene"]) == ["G1", "G2"]
+    assert (out["beta"] == -0.5).all()                       # dropped, never flipped
+    summ = finngen.conversion_summary(raw)
+    assert int(summ["rows_read"].sum()) == 5 and int(summ["dropped_a1freq"].sum()) == 3
+
+
+def test_c10b_a1freq_guard_applies_to_every_endpoint_built():
+    from protscan.adapters import finngen
+    rows = []
+    for ep in ("E4_HYPERCHOL", "I9_HYPTENS", "E4_OBESITY", "T2D"):
+        rows.append([ep, "GOOD", 0.01, 1000, "ADD", -0.3, 0.1, 4.0])
+        rows.append([ep, "FLIPPED", 0.9, 1000, "ADD", 0.3, 0.1, 4.0])
+    raw = _finngen_raw(rows)
+    for trait in ("hypercholesterolemia", "hypertension", "obesity", "type_2_diabetes"):
+        df = finngen.build_trait(trait, raw)
+        assert list(df["gene"]) == ["GOOD"], trait
+
+
+# ---------------- C10c: pinned config hash ----------------
+NL = chr(10)
+
+
+def _run_with_config(synth, tmp_path, text, scenario="pass"):
+    cfg_copy = tmp_path / "cfg.yaml"
+    cfg_copy.write_bytes(text.encode())
+    d = tmp_path / "data"
+    write_tables(synth.make_synthetic(scenario, n_genes=N_GENES), d)
+    from protscan.run import run_pipeline
+    res = run_pipeline(cfg_copy, d, tmp_path / "o" / "protective-scan.json")
+    return res, tmp_path / "o"
+
+
+def test_c10c_edited_config_is_stamped_non_preregistered_everywhere(synth, tmp_path):
+    """R-3 probe: syn_hits_max 3 with a synonymous hit used to give PASS with no flag."""
+    text = CONFIG_PATH.read_text().replace("syn_hits_max: 0", "syn_hits_max: 3")
+    assert text != CONFIG_PATH.read_text()
+    res, out = _run_with_config(synth, tmp_path, text, scenario="broken_syn_hit")
+    assert res["config_matches_ledger"] is False and res["verdict"]["config_matches_ledger"] is False
+    assert "NON-PREREGISTERED" in res["verdict"]["label"]
+    assert res["config_sha256"] != L_CONFIG_SHA256 and res["config_sha256_pinned"] == L_CONFIG_SHA256
+    saved = json.loads((out / "protective-scan.json").read_text())
+    assert saved["config_matches_ledger"] is False and "NON-PREREGISTERED" in saved["verdict"]["label"]
+    assert "NON-PREREGISTERED" in (out / "report.md").read_text()
+
+
+@pytest.mark.parametrize("variant", ["trailing_newline", "comment_only", "extra_key", "crlf"])
+def test_c10c_cosmetic_edits_cannot_bypass_the_pin(variant, synth, tmp_path):
+    text = CONFIG_PATH.read_text()
+    if variant == "trailing_newline":
+        text = text + NL
+    elif variant == "comment_only":
+        text = "# harmless comment" + NL + text
+    elif variant == "extra_key":
+        text = text + "extra_unused: 1" + NL
+    else:
+        text = text.replace(NL, chr(13) + NL)
+    res, _ = _run_with_config(synth, tmp_path, text)
+    assert res["config_matches_ledger"] is False, variant
+
+
+def test_c10c_identical_bytes_at_another_path_match(synth, tmp_path):
+    res, _ = _run_with_config(synth, tmp_path, CONFIG_PATH.read_text())
+    assert res["config_matches_ledger"] is True and "NON-PREREGISTERED" not in res["verdict"]["label"]
+
+
+def test_c10c_cli_exit_codes(synth, tmp_path):
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(ROOT / "src")
+    d = tmp_path / "data"
+    write_tables(synth.make_synthetic("pass", n_genes=N_GENES), d)
+    edited = tmp_path / "edited.yaml"
+    edited.write_text(CONFIG_PATH.read_text().replace("syn_hits_max: 0", "syn_hits_max: 3"))
+    bad = subprocess.run([sys.executable, "-m", "protscan", "run", "--config", str(edited), "--data", str(d),
+                          "--out", str(tmp_path / "bad" / "r.json")], capture_output=True, text=True, env=env, cwd=str(ROOT))
+    assert bad.returncode == 2 and "NON-PREREGISTERED" in bad.stderr
+    good_ = subprocess.run([sys.executable, "-m", "protscan", "run", "--config", str(CONFIG_PATH), "--data", str(d),
+                            "--out", str(tmp_path / "good" / "r.json")], capture_output=True, text=True, env=env, cwd=str(ROOT))
+    assert good_.returncode == 0 and "NON-PREREGISTERED" not in good_.stdout + good_.stderr
+    assert good_.stdout.startswith("verdict: PASS")
+
+
+# ---------------- C10d: rows with undefined se are kept ----------------
+def test_c10d_schema_keeps_rows_with_nan_se_and_still_drops_nan_beta_or_p():
+    rows = [R("G1", "ldl", "syn", "discovery", 0.0, 1.0),
+            R("G2", "ldl", "syn", "discovery", 0.1, 0.5),
+            R("G3", "ldl", "syn", "discovery", float("nan"), 0.5),
+            R("G4", "ldl", "syn", "discovery", 0.1, float("nan"))]
+    rows[0][5] = float("nan")                                # se undefined (beta 0, p 1)
+    df = validate(pd.DataFrame(rows, columns=COLUMNS))
+    assert sorted(df["gene"]) == ["G1", "G2"] and df.attrs["dropped_nan_rows"] == 2
+    assert df.loc[df["gene"] == "G1", "se"].isna().all()
+
+
+def test_c10d_lambda_and_coverage_use_p_only_so_nan_se_rows_count(null_table, cfg):
+    df = null_table.copy()
+    sel = df.index[df["mask"] == "syn"][:2000]
+    df.loc[sel, "se"] = float("nan")
+    n_all = neg_of(null_table, cfg)
+    n_nan = neg_of(df, cfg)
+    assert n_nan["n_rows"] == n_all["n_rows"] and n_nan["coverage"] == n_all["coverage"]
+    assert n_nan["lambda_gc"] == n_all["lambda_gc"] and n_nan["status"] == "OK"
+
+
+def test_c10d_pipeline_serializes_results_with_nan_se_rows(base_frames, tmp_path):
+    def edit(df):
+        sel = df.index[(df["mask"] == "syn") & df["gene"].str.startswith("SYNG")][:500]
+        df.loc[sel, "se"] = float("nan")
+        df.loc[sel, "beta"] = 0.0
+        df.loc[sel, "p"] = 1.0
+    res, _ = mutated_run(base_frames["pass"], edit, tmp_path)
+    assert res["controls"]["valid"] is True and res["verdict"]["verdict"] == "PASS"
+    json.loads((tmp_path / "out" / "protective-scan.json").read_text())
+
+
+@pytest.mark.xfail(strict=False, reason="R2-2: FinnGen rows with SE <= 0 or missing are kept with the LOG10P-derived p, "
+                                          "although a degenerate fit is not evidence")
+def test_c10d_finngen_row_with_degenerate_se_but_significant_p_is_not_used():
+    from protscan.adapters import finngen
+    raw = _finngen_raw([["I9_HYPTENS", "DEGEN", 0.001, 1000, "ADD", -2.0, 0.0, 6.0],
+                        ["I9_HYPTENS", "NANSE", 0.001, 1000, "ADD", -2.0, float("nan"), 6.0],
+                        ["I9_HYPTENS", "FINE", 0.001, 1000, "ADD", -0.5, 0.1, 6.0]])
+    out = finngen.normalize_endpoint(raw, "I9_HYPTENS")
+    assert list(out["gene"]) == ["FINE"]
+
+
+@pytest.mark.xfail(strict=False, reason="R2-2: a replication row with se NaN and a tiny p reaches Tier A")
+def test_c10d_replication_row_with_undefined_se_and_tiny_p_cannot_give_tier_A(cfg):
+    rows = hit_rows("GA", "systolic_bp") + null_tradeoffs("GA", cohorts=("discovery",))
+    r = R("GA", "hypertension", "plof", "replication", good("hypertension"), 1e-9)
+    r[5] = float("nan")
+    rows.append(r)
+    assert tier_map(rows, cfg)[("GA", "systolic_bp")] != "A"
+
+
+# ---------------- C10e: informational harmful-direction panel column ----------------
+def test_c10e_harmful_panel_column_lists_other_traits_and_does_not_gate(cfg):
+    rows = sbp_replicated_gene("GA")
+    rows.append(R("GA", "fev1", "plof", "discovery", bad("fev1"), 1e-12))            # significant, harmful
+    rows.append(R("GA", "hand_grip_strength", "plof", "discovery", bad("hand_grip_strength"), 1e-3))   # not significant
+    hits = tiering.build_hits(T(rows), cfg)
+    row = hits[hits["trait"] == "systolic_bp"].iloc[0]
+    assert [h["trait"] for h in row["harmful_panel"]] == ["fev1"]
+    assert row["tier"] == "A" and bool(row["qualifies"]) is True                      # informational only
+
+
+def test_c10e_end_to_end_report_shows_the_column(scenario_runs):
+    _, res, d = scenario_runs["pass"]
+    assert "harmful panel (info)" in (d / "out" / "report.md").read_text()
+    assert all("harmful_panel" in r for t in "ABCD" for r in res["tiers"][t])
+
+
+# ---------------- C10f: caveats printed with any PASS or LEAD ----------------
+@pytest.mark.parametrize("name", ["pass", "lead"])
+def test_c10f_pass_and_lead_reports_print_c5_and_c7(name, scenario_runs):
+    _, res, d = scenario_runs[name]
+    assert res["verdict"]["verdict"] in ("PASS", "LEAD")
+    text = (d / "out" / "report.md").read_text()
+    assert "C5" in text and "missense|LC" in text and "direction-only" in text
+    assert "C7" in text and "fluid intelligence and reaction time" in text
+
+
+def test_c10f_synthetic_flag_reaches_the_verdict_block_and_stdout(scenario_runs):
+    _, res, _ = scenario_runs["pass"]
+    assert res["verdict"]["synthetic"] is True and "[SYNTHETIC DATA]" in res["verdict"]["label"]
+
+
+# ---------------- C10g ----------------
+def test_c10g_untrusted_replication_rows_do_not_count_as_screening(cfg):
+    disc4 = sbp_gene_with_screen("GA", L_TRADEOFF[:4])
+    trusted = disc4 + [R("GA", L_TRADEOFF[4], "plof", "replication", 0.01, 0.5, source="finngen_r13")]
+    untrusted = disc4 + [R("GA", L_TRADEOFF[4], "plof", "replication", 0.01, 0.5, source="mystery_biobank")]
+    assert tier_map(trusted, cfg)[("GA", "systolic_bp")] == "A"
+    assert tier_map(untrusted, cfg)[("GA", "systolic_bp")] == "B"
+
+
+def test_c10g_untrusted_replication_rows_still_count_for_adverse_detection(cfg):
+    rows = sbp_gene_with_screen("GA", L_TRADEOFF[:5])
+    rows.append(R("GA", L_TRADEOFF[5], "plof", "replication", +0.9, 1e-5, source="mystery_biobank"))
+    assert tier_map(rows, cfg)[("GA", "systolic_bp")] == "C"     # conservative: an adverse signal is never ignored by source
+
+
+def test_c10g_positive_control_is_evaluated_through_the_pipeline_tier_path(null_table, cfg):
+    c = controls.run_controls(validate(null_table), cfg)
+    ldl = [p for p in c["positive"] if p["id"] == "pcsk9_ldl_lower"][0]
+    assert ldl["via_pipeline_tier_path"] is True
+    assert ldl["tested"][0]["pipeline_tier"] in ("A", "B", "D")
+    # a tier-C outcome (adverse trade-off on the control gene) makes the positive control fail
+    df = pd.concat([null_table, pd.DataFrame([R("PCSK9", "type_2_diabetes", "plof", "discovery", +0.9, 1e-5)],
+                                             columns=COLUMNS)], ignore_index=True)
+    c2 = controls.run_controls(validate(df), cfg)
+    ldl2 = [p for p in c2["positive"] if p["id"] == "pcsk9_ldl_lower"][0]
+    assert ldl2["tested"][0]["pipeline_tier"] == "C" and ldl2["status"] == "FAIL" and c2["valid"] is False
+
+
+def test_c10g_synthetic_and_real_sources_cannot_be_mixed(tmp_path):
+    from protscan.schema import load_burden
+    from protscan.run import run_pipeline
+    synth_rows = [R("G1", "ldl", "syn", "discovery", 0.1, 0.5, source="synthetic_discovery")]
+    real_rows = [R("G2", "ldl", "syn", "discovery", 0.1, 0.5, source="genebass")]
+    pd.DataFrame(synth_rows, columns=COLUMNS).to_csv(tmp_path / "burden_a.csv", index=False)
+    pd.DataFrame(real_rows, columns=COLUMNS).to_csv(tmp_path / "burden_b.csv", index=False)
+    with pytest.raises(ValueError, match="mixes synthetic"):
+        load_burden(tmp_path)
+    with pytest.raises(ValueError, match="mixes synthetic"):
+        run_pipeline(CONFIG_PATH, tmp_path, tmp_path / "o" / "r.json")
