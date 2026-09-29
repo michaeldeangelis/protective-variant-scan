@@ -111,3 +111,18 @@ All 13 exist in UKB. Absent-from-source handling stays as ledger says.
 6. Genebass release ambiguity (394,841 vs 426,370; folder `500k`) must be settled from the table metadata at first read, before phenotype rows are opened.
 
 Human actions needed before the run: (a) a GCP project with billing enabled and `gcloud auth application-default login` for requester-pays reads; (b) submit the FinnGen download form (https://elomake.helsinki.fi/lomakkeet/124935/lomake.html) and note which release has gene-based files; (c) decide whether to pursue All of Us Researcher Workbench access; (d) approve a dated amendment entry for items 1 to 3 above.
+
+## 2026-09-29 protective-variant-scan AMENDMENT 1   (rules fixed before any outcome was viewed)
+
+Why: Step 0 feasibility (above) found three facts about data access. No gene-level or trait-level result had been read when this amendment was written; the earlier entry's thresholds, trait panel, direction of benefit, trade-off panel and tier letters are unchanged.
+1. No independent replication exists for continuous cognitive/physical traits: FinnGen gene-based LoF covers binary endpoints only; Genebass, AstraZeneca and Regeneron all use the same UK Biobank exomes; All of Us access is unverified.
+2. A phenotype-permuted run cannot be produced from summary statistics.
+3. The Genebass bucket is requester-pays (needs a GCP billing project and login).
+
+Changes (these replace the corresponding lines of the original entry; all else stands):
+- Replication for Tier A requires a cohort independent of UK Biobank. Declared proxies (fixed now): LDL -> FinnGen hypercholesterolemia endpoint; BMI -> FinnGen obesity endpoint; SBP -> FinnGen hypertension endpoint. Exact endpoint codes are recorded in docs/data-sources.md BEFORE any gene-level result table is opened. Cognitive traits, grip strength, FEV1, walking pace, resting heart rate, parental lifespan have no declared proxy: Tier B is their ceiling.
+- Within-UKB consistency (AstraZeneca portal, or mask agreement) is reported but never counted as replication.
+- Negative control: the phenotype-permuted run is replaced by the synonymous mask: lambda_GC < 1.10 AND zero synonymous-mask genes at the discovery threshold in the beneficial direction. The trivial rung is the synonymous mask.
+- Verdicts: PASS = controls valid AND >= 1 non-lipid Tier-A gene (trait with a declared proxy) with both masks consistent. LEAD = controls valid, no non-lipid Tier-A gene, but >= 1 non-lipid Tier-B gene for a cognitive or physical trait (discovery p < 1.9e-7, both masks consistent, no adverse trade-off); reported as an UNREPLICATED lead only. KILL = any control fails, or controls valid and neither PASS nor LEAD. Decision: PASS -> follow-up as originally stated. LEAD -> follow-up flagged unreplicated, plus seek replication access. KILL -> negative result, thread 1 becomes primary.
+- Access: using a GCP billing project or any login/payment is NOT authorized. Preferred route is any free, non-requester-pays access to Genebass gene-level results. If none exists, real-data stages are parked pending the user; synthetic and gnomAD stages proceed.
+Budget: unchanged ($0 AWS, no GCP spend without the user).
