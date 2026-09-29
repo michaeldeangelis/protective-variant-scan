@@ -1249,3 +1249,17 @@ def test_c9_end_to_end_only_unscreened_lead_gene_gives_kill(base_frames, tmp_pat
     assert res["verdict"]["verdict"] == "KILL" and res["verdict"]["lead_genes"] == []
     _, _, o_verdict = oracle(df)
     assert o_verdict == "KILL"
+
+
+@pytest.mark.xfail(strict=False, reason="R-2: no control covers the replication-side sign convention (see review-1)")
+def test_replication_sign_flip_is_detected_by_a_control_or_flag(synth, tmp_path):
+    tables = synth.make_synthetic("pass", n_genes=N_GENES)
+    rep = tables["burden_synthetic_replication"].copy()
+    rep["beta"] = -rep["beta"]                       # simulate an adapter that reports the wrong allele's effect
+    tables["burden_synthetic_replication"] = rep
+    d = tmp_path / "data"
+    write_tables(tables, d)
+    from protscan.run import run_pipeline
+    res = run_pipeline(CONFIG_PATH, d, tmp_path / "o" / "r.json")
+    flagged = (res["controls"]["valid"] is False) or ("replication_sanity" in res["controls"])
+    assert flagged, "PASS silently became %s with controls valid" % res["verdict"]["verdict"]
