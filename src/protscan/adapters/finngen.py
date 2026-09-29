@@ -39,6 +39,9 @@ ABSENT = {
     "systolic_bp": "continuous trait; proxy: hypertension",
 }
 
+# regenie names each burden set "<gene>.<mask>.<maf>", e.g. "A2ML1.Mask1.0.01"; only this one mask is present.
+MASK_SUFFIX = r"(?i)\.mask\d+\.[0-9.]+$"
+
 USECOLS = ["PHENO", "ID", "A1FREQ", "N", "TEST", "BETA", "SE", "LOG10P"]
 
 
@@ -67,6 +70,7 @@ def normalize_endpoint(raw: pd.DataFrame, endpoint: str) -> pd.DataFrame:
     (max-over-sites) genotype; approximate.
     """
     df = raw[raw["PHENO"] == endpoint].rename(columns={"ID": "gene", "BETA": "beta", "SE": "se", "N": "n_total"})
+    df["gene"] = df["gene"].str.replace(MASK_SUFFIX, "", regex=True)
     df = df.dropna(subset=["gene", "beta", "se", "LOG10P"])
     df = df[df["se"] > 0].copy()
     df["p"] = common.clip_p(np.power(10.0, -df["LOG10P"].astype(float)))
