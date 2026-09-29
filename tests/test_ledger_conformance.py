@@ -642,7 +642,7 @@ def oracle(df):
             tiers[(g, t)] = "D"
     # controls
     syn = df.query("cohort == 'discovery' and mask == 'syn'")
-    lam = float(np.median(chi2.isf(np.clip(syn["p"].to_numpy(), 1e-300, 1.0), 1)) / CHI2_MEDIAN)
+    lam = float(np.median(chi2.isf(np.clip(syn["p"].to_numpy(), 1e-300, 1.0), 1)) / CHI2_MEDIAN) if len(syn) else float("inf")
     syn_hits = [r for r in syn.itertuples() if r.trait in L_PANEL and oracle_discovery(r.beta, r.p, L_PANEL[r.trait][1])]
 
     def rowof(g, t):
@@ -949,3 +949,129 @@ def test_same_trait_replication_for_cognitive_trait_still_lead_not_pass(base_fra
     res, df = mutated_run(base_frames["lead"], edit, tmp_path)
     assert res["verdict"]["verdict"] == "LEAD" and res["verdict"]["pass_genes"] == []
     assert result_tiers(res)[("SYNLEAD1", "fluid_intelligence")] == "B"
+
+
+# ---------------- verdict logic: exhaustive over tier/qualification combinations ----------------
+def _hits_frame(spec):
+    """spec: list of (tier, qualifies). One distinct gene per entry."""
+    rows = [dict(gene="G%d" % i, tier=t, qualifies=q) for i, (t, q) in enumerate(spec)]
+    return pd.DataFrame(rows, columns=["gene", "tier", "qualifies"])
+
+
+def _all_specs():
+    keys = [(t, q) for t in "ABCD" for q in (True, False)]
+    for mask in range(1 << len(keys)):
+        yield [keys[i] for i in range(len(keys)) if mask >> i & 1]
+
+
+CTRL_OK = dict(valid=True, failed=[], not_run=[])
+CTRL_FAIL = dict(valid=False, failed=["pcsk9_ldl_lower"], not_run=[])
+CTRL_NOTRUN = dict(valid=False, failed=[], not_run=["negative_synonymous"])
+
+
+def test_decide_is_exhaustively_consistent_with_amendment_1():
+    from protscan.run import decide
+    n = 0
+    for spec in _all_specs():
+        h = _hits_frame(spec)
+        has_a = ("A", True) in spec
+        has_b = ("B", True) in spec
+        v = decide(CTRL_OK, h)["verdict"]
+        assert v == ("PASS" if has_a else "LEAD" if has_b else "KILL"), spec
+        assert decide(CTRL_FAIL, h)["verdict"] == "KILL", spec
+        assert decide(CTRL_NOTRUN, h)["verdict"] == "KILL", spec
+        n += 1
+    assert n == 256
+
+
+def test_decide_never_lists_tier_B_gene_as_pass_gene():
+    from protscan.run import decide
+    out = decide(CTRL_OK, _hits_frame([("B", True), ("B", True), ("C", True), ("D", True), ("A", False)]))
+    assert out["verdict"] == "LEAD" and out["pass_genes"] == [] and len(out["lead_genes"]) == 2
+
+
+# ---------------- fuzz: implementation tiers vs independent oracle ----------------
+def _fuzz_table(seed, n_genes=60):
+    rng = np.random.default_rng(seed)
+    panel = sorted(L_PANEL)
+    proxies_of = L_PROXIES
+    indep = ["finngen_r13", "all_of_us_aba", "FinnGen_R12"]
+    ukb = ["genebass", "azphewas_v1", "regeneron_rgc", "UKB_lookup", "opentargets"]
+    rows = []
+    for i in range(n_genes):
+        g = "F%03d" % i
+        for t in rng.choice(panel, size=int(rng.integers(1, 4)), replace=False):
+            sgn = 1 if rng.random() < 0.7 else -1
+            p = float(10 ** rng.uniform(-9, -6))                  # straddles 1.9e-7
+            while 1.89e-7 <= p <= 1.93e-7:                          # ledger prints 1.9e-7, formula gives 1.923e-7
+                p = float(10 ** rng.uniform(-9, -6))
+            rows.append(R(g, t, "plof", "discovery", sgn * benefit_sign(t) * 0.3, p))
+            rows.append(R(g, t, "dmis", "discovery", float(rng.normal()), 0.4))
+            if t in proxies_of and rng.random() < 0.8:
+                px = proxies_of[t]
+                s2 = 1 if rng.random() < 0.7 else -1
+                p2 = float(rng.choice([0.001, 0.03, 0.0999, 0.1, 0.11, 0.4, 0.9]))
+                src = str(rng.choice(indep + ukb))
+                rows.append(R(g, px, "plof", "replication", s2 * benefit_sign(px) * 0.2, p2, source=src))
+        for out in L_TRADEOFF:
+            for cohort in ("discovery", "replication"):
+                if rng.random() < 0.6:
+                    p3 = float(10 ** rng.uniform(-6, 0))
+                    while 0.0053 <= p3 <= 0.0115:              # one-sided vs two-sided reading differs here
+                        p3 = float(10 ** rng.uniform(-6, 0))
+                    rows.append(R(g, out, "plof", cohort, float(rng.normal()), p3))
+    return T(rows)
+
+
+@pytest.mark.parametrize("seed", range(25))
+def test_fuzz_tiers_match_independent_oracle(seed, cfg):
+    df = _fuzz_table(seed)
+    hits = tiering.build_hits(df, cfg)
+    got = dict(((r.gene, r.trait), r.tier) for r in hits.itertuples())
+    _, want, _ = oracle(df)
+    assert got == want
+
+
+# ---------------- documented gaps (xfail, non-strict): see reviews/review-1.md ----------------
+@pytest.mark.xfail(strict=False, reason="R-1: negative control has no minimum coverage; 3 synonymous rows validate the pipeline")
+def test_negative_control_must_cover_the_discovery_universe(cfg):
+    rows = [R("PCSK9", "ldl", "plof", "discovery", good("ldl"), 1e-30),
+            R("PCSK9", "coronary_disease", "plof", "discovery", good("coronary_disease"), 1e-4),
+            R("APOC3", "triglycerides", "plof", "discovery", good("triglycerides"), 1e-30),
+            R("PCSK9", "ldl", "syn", "discovery", 0.001, 0.6),
+            R("G1", "ldl", "syn", "discovery", 0.001, 0.5),
+            R("G2", "bmi", "syn", "discovery", 0.001, 0.4)]
+    c = controls.run_controls(T(rows), cfg)
+    assert c["valid"] is False
+
+
+@pytest.mark.xfail(strict=False, reason="R-4: PCSK9 coronary control is direction-only; passes at p=0.99")
+def test_pcsk9_coronary_control_cannot_pass_on_noise(null_table, cfg):
+    df = set_row(null_table, "PCSK9", "coronary_disease", "plof", "discovery", beta=good("coronary_disease", 0.01), p=0.99)
+    assert run_ctrl(df, cfg)["valid"] is False
+
+
+@pytest.mark.xfail(strict=False, reason="R-5: Confirmation clause (b) EUR-only not enforced; PASS reported plain")
+def test_pass_with_failed_eur_only_reanalysis_is_not_plain_pass(base_frames, tmp_path):
+    def edit(df):
+        setrow(df, "SYNPASS1", "systolic_bp", "plof", "discovery_eur", beta=0.0, p=0.9)
+    res, _ = mutated_run(base_frames["pass"], edit, tmp_path)
+    assert result_tiers(res)[("SYNPASS1", "systolic_bp")] == "A"
+    v = res["verdict"]
+    assert v["verdict"] != "PASS" or "eur" in json.dumps(v).lower()
+
+
+@pytest.mark.xfail(strict=False, reason="R-3: any --config is accepted; verdict not tied to the preregistered constants")
+def test_edited_config_cannot_silently_produce_a_verdict(synth, tmp_path):
+    text = CONFIG_PATH.read_text().replace("syn_hits_max: 0", "syn_hits_max: 3")
+    assert "syn_hits_max: 3" in text
+    cfg_copy = tmp_path / "loose.yaml"
+    cfg_copy.write_text(text)
+    d = tmp_path / "data"
+    write_tables(synth.make_synthetic("broken_syn_hit", n_genes=N_GENES), d)
+    from protscan.run import run_pipeline
+    try:
+        res = run_pipeline(cfg_copy, d, tmp_path / "o" / "r.json")
+    except Exception:
+        return
+    assert res["verdict"]["verdict"] == "KILL" or res.get("config_matches_ledger") is False
