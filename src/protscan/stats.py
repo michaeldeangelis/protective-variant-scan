@@ -34,12 +34,29 @@ def discovery_hits(df: pd.DataFrame, cfg: Config, mask: str = "plof") -> pd.Data
     return r[["gene", "trait", "beta", "se", "p", "n_carriers"]].reset_index(drop=True)
 
 
+def _source_independent(src: pd.Series, cfg: Config) -> pd.Series:
+    s = src.astype(str).str.lower()
+    allow = pd.Series(False, index=s.index)
+    deny = pd.Series(False, index=s.index)
+    for tok in cfg.independent_sources:
+        allow |= s.str.contains(tok, regex=False)
+    for tok in cfg.ukb_sources:
+        deny |= s.str.contains(tok, regex=False)
+    return allow & ~deny
+
+
+def independent_replication(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
+    """plof replication rows from an allow-listed source that does not overlap UK Biobank (Amendment 1)."""
+    r = _rows(df, "replication", "plof")
+    return r[_source_independent(r["source"], cfg)]
+
+
 def replication_status(hits: pd.DataFrame, df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
     """Independent-cohort replication. Only traits with a declared proxy can replicate (Amendment 1).
 
     rep_status: replicated | failed | trait_missing | gene_untested
     """
-    rep = _rows(df, "replication", "plof").set_index(["gene", "trait"])
+    rep = independent_replication(df, cfg).set_index(["gene", "trait"])
     rep_traits = set(rep.index.get_level_values("trait"))
     out = []
     for g, t in zip(hits["gene"], hits["trait"]):

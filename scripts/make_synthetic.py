@@ -95,6 +95,7 @@ def make_synthetic(scenario="pass", seed=20260929, n_genes=3000, config_path=DEF
     # lipid positive controls (invented numbers)
     if scenario != "broken_positive":
         _set_z(disc, "PCSK9", "ldl", "plof", good("ldl", 15))
+        _set_z(disc, "PCSK9", "ldl", "dmis", good("ldl", 3))
         _set_z(disc, "PCSK9", "coronary_disease", "plof", good("coronary_disease", 4))
         _set_z(rep, "PCSK9", "hypercholesterolemia", "plof", good("hypercholesterolemia", 6))
     _set_z(disc, "ANGPTL4", "triglycerides", "plof", good("triglycerides", 9))
