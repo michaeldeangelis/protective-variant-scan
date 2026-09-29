@@ -146,6 +146,7 @@ def run_pipeline(config_path, data_dir, out_path) -> dict:
         "thresholds": {
             "discovery_p": cfg.discovery_p, "replication_one_sided_p": cfg.replication_p,
             "tradeoff_p": cfg.tradeoff_p, "lambda_gc_max": cfg.lambda_gc_max, "n_tradeoff": len(cfg.tradeoff),
+            "min_tradeoffs_screened": cfg.min_tradeoffs_screened,
         },
         "controls": ctrl,
         "rungs": _rungs(cfg, ctrl, disc, hits, incumbent),

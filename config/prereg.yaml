@@ -69,6 +69,7 @@ replication:
 
 tradeoff_screen:
   alpha: 0.05                # divided by N_tradeoff (9); one-sided, harmful direction, plof mask
+  min_tradeoffs_screened: 5  # Amendment 1 C1: Tier A needs >= 5 of 9 outcomes screened (plof) for the gene, else capped at Tier B
 
 controls:
   lambda_gc_max: 1.10        # synonymous mask, all genes and traits pooled

@@ -11,14 +11,14 @@ def _fmt(x, spec=".3g"):
 def _tier_table(rows: list, n_tradeoff: int) -> list:
     if not rows:
         return ["(none)", ""]
-    out = ["| gene | trait | beta | p | replication | dmis | EUR-only | adverse | screened | lipid | qualifies | LOEUF |",
-           "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    out = ["| gene | trait | beta | p | replication | dmis | EUR-only | adverse | screened | lipid | qualifies | LOEUF | note |",
+           "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in rows[:MAX_ROWS]:
         rep = r["rep_status"] if r["rep_trait"] is None else f"{r['rep_status']} ({r['rep_trait']}, p1={_fmt(r['rep_p_onesided'])})"
         adv = ", ".join(a["trait"] for a in r["adverse"]) or "-"
         out.append(f"| {r['gene']} | {r['trait']} | {_fmt(r['beta'])} | {_fmt(r['p'])} | {rep} | {r['mask_status']} | "
                    f"{r['eur_status']} | {adv} | {r['n_tradeoff_tested']}/{n_tradeoff} | {'yes' if r['lipid_gene'] else 'no'} | {'yes' if r['qualifies'] else 'no'} | "
-                   f"{_fmt(r.get('loeuf'))} |")
+                   f"{_fmt(r.get('loeuf'))} | {'trade-off unscreened' if r['tradeoff_unscreened'] else ''} |")
     if len(rows) > MAX_ROWS:
         out.append(f"... {len(rows) - MAX_ROWS} more in the JSON")
     return out + [""]
@@ -88,6 +88,8 @@ def render(res: dict) -> str:
           "Within-UKB consistency (dmis mask) is reported and never counted as replication; AstraZeneca portal lookups are not automated.",
           "- EUR-only column is reported and does not gate the verdict. 'screened' = trade-off outcomes with a pLoF row for the gene; "
           "unscreened outcomes cannot be excluded as adverse.",
+          f"- Tier A needs >= {res['thresholds']['min_tradeoffs_screened']} of {res['thresholds']['n_tradeoff']} trade-off outcomes screened "
+          "(pLoF) for the gene; otherwise a replicated gene is capped at Tier B and labeled 'trade-off unscreened'.",
           f"- Traits absent from discovery: {', '.join(d['traits_absent']['discovery']) or 'none'}.",
           f"- Traits absent from replication: {', '.join(d['traits_absent']['replication']) or 'none'}.",
           ""]

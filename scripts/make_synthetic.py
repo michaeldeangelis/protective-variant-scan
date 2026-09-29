@@ -11,6 +11,7 @@ Scenarios (expected verdict on the default config):
   broken_positive   KILL   PCSK9 effects removed
   broken_lambda     KILL   synonymous z-scores inflated (lambda_GC ~1.7)
   broken_syn_hit    KILL   one synonymous-mask gene at the discovery threshold, beneficial direction
+  unscreened        LEAD   SYNPASS1 replicates but only 4 of 9 trade-offs are screened: capped at Tier B (C1)
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ from scipy.stats import norm
 
 from protscan.schema import COLUMNS, load_config
 
-SCENARIOS = ("pass", "lead", "nolead", "broken_positive", "broken_lambda", "broken_syn_hit")
+SCENARIOS = ("pass", "lead", "nolead", "broken_positive", "broken_lambda", "broken_syn_hit", "unscreened")
 BINARY_SE_SCALE = 3.0
 N_TOTAL = {"discovery": 400_000, "replication": 300_000}
 CARRIERS = {"plof": 150, "dmis": 1500, "syn": 3000}
@@ -116,10 +117,10 @@ def make_synthetic(scenario="pass", seed=20260929, n_genes=3000, config_path=DEF
         e["p"] = 2 * norm.sf(abs(e["beta"] / e["se"]))
         eur_rows.append(e)
 
-    if scenario in ("pass", "broken_positive", "broken_lambda", "broken_syn_hit"):
+    if scenario in ("pass", "broken_positive", "broken_lambda", "broken_syn_hit", "unscreened"):
         # beneficial non-lipid gene: SBP lower, replicates via the hypertension proxy, no adverse trade-off
         hit("SYNPASS1", "systolic_bp", 8, good("systolic_bp", 2), "hypertension", good("hypertension", 3))
-    if scenario != "nolead":
+    if scenario not in ("nolead", "unscreened"):
         # cognitive gene: no declared proxy, so Tier B ceiling; both masks agree
         hit("SYNLEAD1", "fluid_intelligence", 7, good("fluid_intelligence", 2))
     # SBP gene with an adverse trade-off (coronary disease, harmful direction): Tier C
@@ -137,6 +138,11 @@ def make_synthetic(scenario="pass", seed=20260929, n_genes=3000, config_path=DEF
         disc.loc[s, "p"] = 2 * norm.sf(np.abs(z))
     if scenario == "broken_syn_hit":
         _set_z(disc, "SYNSYN1", "hand_grip_strength", "syn", good("hand_grip_strength", 7))
+
+    if scenario == "unscreened":
+        drop = list(cfg.tradeoff)[4:]
+        disc = disc[~((disc.gene == "SYNPASS1") & disc.trait.isin(drop))]
+        rep = rep[~((rep.gene == "SYNPASS1") & rep.trait.isin(drop))]
 
     disc = pd.concat([disc] + eur_rows, ignore_index=True)
     return {

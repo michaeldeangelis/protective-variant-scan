@@ -163,3 +163,52 @@ def test_positive_controls():
                      row("ANGPTL4", "triglycerides", beta=+1.0))
     assert [c["status"] for c in controls.positive_controls(weak_ldl, cfg)] == ["FAIL", "FAIL", "FAIL"]
     assert [c["status"] for c in controls.positive_controls(table(row("Q", "ldl")), cfg)] == ["NOT RUN"] * 3
+
+
+# ---- C1: Tier A needs >= min_tradeoffs_screened of 9 outcomes screened (plof) ----
+def _sbp_replicated(gene="G", k=9, rep_outcomes=(), disc_mask="plof", disc_cohort="discovery", extra=()):
+    outs = list(cfg.tradeoff)
+    rows = [row(gene, "systolic_bp"), row(gene, "systolic_bp", mask="dmis", beta=-0.1, p=0.3),
+            row(gene, "hypertension", cohort="replication", beta=-0.3, p=0.01)]
+    rows += [row(gene, t, mask=disc_mask, cohort=disc_cohort, beta=0.01, p=0.9) for t in outs[:k]]
+    rows += [row(gene, t, cohort="replication", beta=0.01, p=0.9) for t in rep_outcomes]
+    return table(*rows, *extra)
+
+
+def test_min_tradeoffs_screened_config():
+    assert cfg.min_tradeoffs_screened == 5
+
+
+@pytest.mark.parametrize("k,tier", [(0, "B"), (3, "B"), (4, "B"), (5, "A"), (6, "A"), (9, "A")])
+def test_tier_A_boundary_on_tradeoffs_screened(k, tier):
+    h = tiering.build_hits(_sbp_replicated(k=k), cfg).iloc[0]
+    assert h["n_tradeoff_tested"] == k and h["tier"] == tier
+    assert bool(h["tradeoff_unscreened"]) == (k < 5)
+
+
+def test_screened_counts_distinct_outcomes_across_cohorts_plof_only():
+    outs = list(cfg.tradeoff)
+    same = tiering.build_hits(_sbp_replicated(k=3, rep_outcomes=outs[:3]), cfg).iloc[0]
+    assert same["n_tradeoff_tested"] == 3 and same["tier"] == "B"
+    union = tiering.build_hits(_sbp_replicated(k=3, rep_outcomes=outs[3:5]), cfg).iloc[0]
+    assert union["n_tradeoff_tested"] == 5 and union["tier"] == "A"
+    dmis_only = tiering.build_hits(_sbp_replicated(k=9, disc_mask="dmis"), cfg).iloc[0]
+    assert dmis_only["n_tradeoff_tested"] == 0 and dmis_only["tier"] == "B"
+    eur_only = tiering.build_hits(_sbp_replicated(k=9, disc_cohort="discovery_eur"), cfg).iloc[0]
+    assert eur_only["n_tradeoff_tested"] == 0 and eur_only["tier"] == "B"
+
+
+def test_unscreened_cap_does_not_touch_tiers_C_and_D():
+    adv = [row("G", "coronary_disease", beta=0.9, p=1e-6)]
+    c = tiering.build_hits(_sbp_replicated(k=0, extra=adv), cfg).iloc[0]
+    assert c["tier"] == "C"                      # adverse found: stays C although only 1 outcome screened
+    failed = _sbp_replicated(k=2)
+    failed.loc[failed.trait == "hypertension", ["beta", "p"]] = [0.3, 0.01]
+    assert tiering.build_hits(failed, cfg).iloc[0]["tier"] == "D"
+
+
+def test_report_labels_unscreened():
+    from protscan.report import _tier_table
+    rec = tiering.build_hits(_sbp_replicated(k=4), cfg).iloc[0].to_dict()
+    rec.update(loeuf=None, rep_p_onesided=0.005)
+    assert "trade-off unscreened" in "\n".join(_tier_table([rec], 9))
