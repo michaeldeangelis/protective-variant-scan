@@ -89,7 +89,8 @@ def render(res: dict) -> str:
           "- EUR-only column is reported and does not gate the verdict. 'screened' = trade-off outcomes with a pLoF row for the gene; "
           "unscreened outcomes cannot be excluded as adverse.",
           f"- Tier A needs >= {res['thresholds']['min_tradeoffs_screened']} of {res['thresholds']['n_tradeoff']} trade-off outcomes screened "
-          "(pLoF) for the gene; otherwise a replicated gene is capped at Tier B and labeled 'trade-off unscreened'.",
+          "(pLoF) for the gene; otherwise a replicated gene is capped at Tier B and labeled 'trade-off unscreened'. "
+          "The same minimum applies to LEAD (C9): unscreened Tier-B genes are listed but do not count.",
           f"- Traits absent from discovery: {', '.join(d['traits_absent']['discovery']) or 'none'}.",
           f"- Traits absent from replication: {', '.join(d['traits_absent']['replication']) or 'none'}.",
           ""]
