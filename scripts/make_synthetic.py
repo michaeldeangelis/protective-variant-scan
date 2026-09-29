@@ -54,6 +54,14 @@ def _set_z(df, gene, trait, mask, z):
     df.loc[i, "p"] = 2 * norm.sf(abs(z))
 
 
+def _clip_z(df, genes, traits, zmax=1.5):
+    """Keep the planted 'clean' genes free of chance trade-off hits."""
+    m = df.gene.isin(genes) & df.trait.isin(traits)
+    z = (df.loc[m, "beta"] / df.loc[m, "se"]).clip(-zmax, zmax)
+    df.loc[m, "beta"] = z * df.loc[m, "se"]
+    df.loc[m, "p"] = 2 * norm.sf(np.abs(z))
+
+
 def make_synthetic(scenario="pass", seed=20260929, n_genes=3000, config_path=DEFAULT_CONFIG):
     """Return {"burden_synthetic_discovery": df, "burden_synthetic_replication": df}."""
     if scenario not in SCENARIOS:
@@ -79,6 +87,10 @@ def make_synthetic(scenario="pass", seed=20260929, n_genes=3000, config_path=DEF
     r_scale = {t: BINARY_SE_SCALE for t in r_traits}
     r_genes = planted + [g for g in genes[len(planted):] if rng.random() < 0.5]
     rep = _frame(r_genes, r_traits, ["plof"], "replication", "synthetic_replication", r_scale, rng)
+
+    clean = ["SYNPASS1", "SYNLEAD1", "SYNFAIL1", "SYNMASK1"]
+    _clip_z(disc, clean, list(cfg.tradeoff))
+    _clip_z(rep, clean, list(cfg.tradeoff))
 
     # lipid positive controls (invented numbers)
     if scenario != "broken_positive":
