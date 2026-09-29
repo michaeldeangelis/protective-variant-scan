@@ -154,3 +154,6 @@ Data in hand: Genebass discovery via the open REST API (CC BY 4.0), FinnGen R13 
 - C10e (R-7): Informational only, no gating: the report adds, per Tier A/B gene, any significant (discovery threshold) harmful-direction association on the other panel traits.
 - C10f (R-8): Any PASS or LEAD report prints the C5 (missense|LC) and C7 (cognitive coverage limited to fluid intelligence and reaction time) caveats.
 - C10g (R-6, R-4, R-10): screening counts use only allow-listed replication rows; requests and pyarrow are declared in pyproject; positive controls are evaluated through the pipeline's own tier path.
+
+### 2026-09-29 C8 hold lifted
+The user registered for FinnGen summary-statistics access (confirmation email from the FinnGen service desk, received 5:54 PM on 2026-09-29 and pasted into the session). The C8 hold on opening the FinnGen replication tables is lifted, effective after the C10 fixes and reviewer re-check. FinnGen asks that publications acknowledge "the participants and investigators of the FinnGen study" and cite Kurki et al., Nature 613:508-518 (2023), doi:10.1038/s41586-022-05473-8; recorded in README.md.
