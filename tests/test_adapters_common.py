@@ -96,3 +96,16 @@ def test_download_streams_and_checksums_over_localhost(tmp_path):
     assert rec["bytes"] == len(payload)
     assert rec["sha256"] == hashlib.sha256(payload).hexdigest() == common.sha256_file(tmp_path / "out" / "f.bin")
     assert rec["md5_b64"] == base64.b64encode(hashlib.md5(payload).digest()).decode()
+
+
+def test_ivw_combine_keeps_genes_whose_se_is_undefined():
+    a = _frame([("A", "plof", 0.4, 0.2, 10, 100), ("U", "plof", 0.0, np.nan, 5, 100), ("M", "plof", 0.0, np.nan, 5, 100)])
+    a["p"] = [0.04, 1.0, 1.0]
+    b = _frame([("A", "plof", 0.6, np.nan, 7, 100), ("U", "plof", 0.0, np.nan, 6, 100), ("M", "plof", 0.5, 0.25, 6, 100)])
+    b["p"] = [1.0, 1.0, 0.05]
+    out = common.ivw_combine([a, b], "sum").set_index("gene")
+    assert list(out.index) == ["A", "M", "U"]
+    assert out.loc["A", "beta"] == pytest.approx(0.4) and out.loc["A", "se"] == pytest.approx(0.2)  # NaN-se component ignored
+    assert out.loc["M", "beta"] == pytest.approx(0.5) and out.loc["M", "se"] == pytest.approx(0.25)
+    assert out.loc["U", "beta"] == 0.0 and np.isnan(out.loc["U", "se"]) and out.loc["U", "p"] == 1.0
+    assert out.loc["U", "n_carriers"] == 11

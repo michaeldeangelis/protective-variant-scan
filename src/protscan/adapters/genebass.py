@@ -73,7 +73,8 @@ def normalize_analysis(records, qc_records, mask: str, n_total: int) -> pd.DataF
     p is Pvalue_Burden so that p, beta and the reconstructed se describe the same test (SKAT-O p is not used).
     The gene-manhattan endpoint returns no SE and no carrier count: se = |beta| / z(p); n_carriers ~ 2 * CAF * N
     (CAF is gene-level and not phenotype-specific, so the count is approximate). Symbols shared by more than one
-    Ensembl gene are ambiguous and dropped.
+    Ensembl gene are ambiguous and dropped. Rows whose se is undefined (beta 0 or p 1) are kept with se = NaN and p
+    intact, because lambda_GC and hit counts use p only.
     """
     df = pd.DataFrame(records)
     df = df.rename(columns={"gene_symbol": "gene", "BETA_Burden": "beta", "Pvalue_Burden": "p"})
@@ -83,7 +84,6 @@ def normalize_analysis(records, qc_records, mask: str, n_total: int) -> pd.DataF
     df = df[~df["gene"].duplicated(keep=False)].copy()
     df["se"] = common.se_from_beta_p(df["beta"], df["p"])
     df["p"] = common.clip_p(df["p"])
-    df = df.dropna(subset=["se"])
     df["n_total"] = int(n_total)
     df["n_carriers"] = common.approx_carriers(df["CAF"].fillna(0.0), df["n_total"])
     df["mask"] = mask

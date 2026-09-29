@@ -5,6 +5,8 @@ binary endpoints only. Endpoint choices were fixed 2026-09-29 before any result 
 """
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 
@@ -42,6 +44,11 @@ ABSENT = {
 # regenie names each burden set "<gene>.<mask>.<maf>", e.g. "A2ML1.Mask1.0.01"; only this one mask is present.
 MASK_SUFFIX = r"(?i)\.mask\d+\.[0-9.]+$"
 
+# The LoF carrier allele is A1 (ALLELE1), so a collapsed-genotype frequency above 0.5 means the effect sign may refer to
+# the other allele. Such rows are dropped, not flipped; NaN also fails the check.
+A1FREQ_MAX = 0.5
+log = logging.getLogger(__name__)
+
 USECOLS = ["PHENO", "ID", "A1FREQ", "N", "TEST", "BETA", "SE", "LOG10P"]
 
 
@@ -63,16 +70,35 @@ def read_lof(path, endpoints=None, chunksize: int = 500_000) -> pd.DataFrame:
     return pd.concat(keep, ignore_index=True)
 
 
+def guard_a1freq(df: pd.DataFrame):
+    """Keep rows with A1FREQ <= 0.5 (NaN fails). Returns (kept, dropped-row counts per PHENO) and logs any drops."""
+    ok = df["A1FREQ"] <= A1FREQ_MAX
+    dropped = df.loc[~ok].groupby("PHENO").size()
+    if len(dropped):
+        log.warning("dropped %d rows with A1FREQ > %s or missing: %s", int(dropped.sum()), A1FREQ_MAX, dropped.to_dict())
+    return df.loc[ok], dropped
+
+
+def conversion_summary(raw: pd.DataFrame) -> pd.DataFrame:
+    """Per-endpoint row counts: read, dropped by the A1FREQ guard, kept with undefined se (se <= 0 or missing)."""
+    kept, dropped = guard_a1freq(raw)
+    out = pd.DataFrame({"rows_read": raw.groupby("PHENO").size()})
+    out["dropped_a1freq"] = dropped.reindex(out.index).fillna(0).astype(int)
+    out["kept_se_undefined"] = (~(kept["SE"] > 0)).groupby(kept["PHENO"]).sum().reindex(out.index).fillna(0).astype(int)
+    return out.reset_index().rename(columns={"PHENO": "endpoint"})
+
+
 def normalize_endpoint(raw: pd.DataFrame, endpoint: str) -> pd.DataFrame:
     """One endpoint -> gene, mask, beta, se, p, n_carriers, n_total.
 
     The table has no carrier count: n_carriers ~ 2 * A1FREQ * N, where A1FREQ is the frequency of the collapsed
-    (max-over-sites) genotype; approximate.
+    (max-over-sites) genotype; approximate. Rows failing the A1FREQ <= 0.5 guard are dropped (see guard_a1freq). Rows
+    with an undefined se (SE <= 0 or missing) are kept with se = NaN and p intact.
     """
-    df = raw[raw["PHENO"] == endpoint].rename(columns={"ID": "gene", "BETA": "beta", "SE": "se", "N": "n_total"})
+    df = guard_a1freq(raw[raw["PHENO"] == endpoint])[0].rename(columns={"ID": "gene", "BETA": "beta", "SE": "se", "N": "n_total"})
     df["gene"] = df["gene"].str.replace(MASK_SUFFIX, "", regex=True)
-    df = df.dropna(subset=["gene", "beta", "se", "LOG10P"])
-    df = df[df["se"] > 0].copy()
+    df = df.dropna(subset=["gene", "beta", "LOG10P"]).copy()
+    df["se"] = df["se"].where(df["se"] > 0)
     df["p"] = common.clip_p(np.power(10.0, -df["LOG10P"].astype(float)))
     df["n_total"] = df["n_total"].astype("int64")
     df["n_carriers"] = common.approx_carriers(df["A1FREQ"].fillna(0.0), df["n_total"])

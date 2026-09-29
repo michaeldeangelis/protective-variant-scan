@@ -97,20 +97,31 @@ def ivw_combine(frames, n_rule: str) -> pd.DataFrame:
 
     frames: DataFrames with gene, mask, beta, se, n_carriers, n_total (one per component analysis).
     n_rule: 'sum' when the components use disjoint people (sexes); 'max' when they reuse the same people.
-    A gene present in only one component keeps that component's estimate.
+    A gene present in only one component keeps that component's estimate. Components with an undefined se (NaN) cannot
+    be weighted: they are ignored when another component has a defined se; a gene with no defined se in any component
+    is kept with beta = mean, p = max, se = NaN (such rows are beta 0 or p 1, so they stay uninformative).
     """
     if n_rule not in ("sum", "max"):
         raise ValueError("n_rule must be 'sum' or 'max'")
     df = pd.concat(frames, ignore_index=True)
-    df = df[df["se"] > 0].copy()
-    df["w"] = 1.0 / df["se"] ** 2
-    df["wb"] = df["w"] * df["beta"]
-    agg = {"w": "sum", "wb": "sum", "n_carriers": n_rule, "n_total": n_rule}
-    g = df.groupby(["gene", "mask"], sort=True).agg(agg).reset_index()
+    key = ["gene", "mask"]
+    n_agg = {"n_carriers": n_rule, "n_total": n_rule}
+    ok = df[df["se"] > 0].copy()
+    ok["w"] = 1.0 / ok["se"] ** 2
+    ok["wb"] = ok["w"] * ok["beta"]
+    g = ok.groupby(key, sort=True).agg({"w": "sum", "wb": "sum", **n_agg}).reset_index()
     g["beta"] = g["wb"] / g["w"]
     g["se"] = 1.0 / np.sqrt(g["w"])
     g["p"] = clip_p(2.0 * norm.sf(np.abs(g["beta"] / g["se"])))
-    return g[["gene", "mask", "beta", "se", "p", "n_carriers", "n_total"]]
+    cols = ["gene", "mask", "beta", "se", "p", "n_carriers", "n_total"]
+    bad = df[~(df["se"] > 0)]
+    bad = bad.merge(g[key], on=key, how="left", indicator=True)
+    bad = bad[bad["_merge"] == "left_only"]
+    if len(bad):
+        u = bad.groupby(key, sort=True).agg({"beta": "mean", "p": "max", **n_agg}).reset_index()
+        u["se"] = np.nan
+        g = pd.concat([g[cols], u[cols]], ignore_index=True).sort_values(key, ignore_index=True)
+    return g[cols]
 
 
 def finalize(df: pd.DataFrame, trait: str, cohort: str, source: str) -> pd.DataFrame:
