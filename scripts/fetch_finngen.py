@@ -5,6 +5,7 @@ The gz is streamed and filtered to the declared proxy and trade-off endpoints; t
 FinnGen asks users to submit its online form (docs/data-sources.md); this script does not submit it.
 """
 import argparse
+import logging
 import sys
 from pathlib import Path
 from urllib.parse import quote
@@ -53,7 +54,12 @@ def main() -> None:
             common.record_manifest(manifest, rec)
             print(f"downloaded {dest.name}: {rec['bytes']} bytes, md5 ok, sha256={rec['sha256'][:16]}...")
 
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
     raw_lof = finngen.read_lof(raw / LOF.rsplit("/", 1)[1])
+    summary = finngen.conversion_summary(raw_lof)
+    summary.to_csv(data / "finngen_conversion_summary.csv", index=False)
+    print(f"A1FREQ guard: {int(summary['dropped_a1freq'].sum())} of {int(summary['rows_read'].sum())} rows dropped; "
+          f"{int(summary['kept_se_undefined'].sum())} kept rows have undefined se (summary: finngen_conversion_summary.csv)")
     present = sorted(set(raw_lof["PHENO"]))
     frames, missing = [], []
     for trait, eps in finngen.ENDPOINTS.items():

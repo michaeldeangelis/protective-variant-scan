@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 from scipy.stats import norm
@@ -37,8 +38,11 @@ def test_qc_pass_uses_coverage_and_nvar_only(qc):
 
 def test_normalize_analysis_drops_and_derives(records, qc):
     out = genebass.normalize_analysis(records, qc, "plof", 100000).set_index("gene")
-    # dropped: null result (GENEC), ambiguous symbol (DUPSYM), beta=0 (GENED), coverage fail (GENEE), null n_var (GENEG)
-    assert sorted(out.index) == ["GENEA", "GENEB", "GENEF"]
+    # dropped: null result (GENEC), ambiguous symbol (DUPSYM), coverage fail (GENEE), null n_var (GENEG)
+    # kept with undefined se: GENED (beta 0, p 1), so lambda_GC and hit counts still see it
+    assert sorted(out.index) == ["GENEA", "GENEB", "GENED", "GENEF"]
+    d = out.loc["GENED"]
+    assert np.isnan(d["se"]) and d["p"] == 1.0 and d["beta"] == 0.0
     a = out.loc["GENEA"]
     assert a["beta"] == -0.5 and a["se"] == pytest.approx(0.1, rel=1e-6)
     assert a["p"] == pytest.approx(2 * norm.sf(5.0))
@@ -53,7 +57,13 @@ def test_normalized_rows_pass_the_pipeline_schema(records, qc):
     df = genebass.build_trait("ldl", [pd.concat(per, ignore_index=True)])
     out = schema.validate(df)
     assert set(out["cohort"]) == {"discovery"} and set(out["source"]) == {"genebass"}
-    assert set(out["mask"]) == {"plof", "dmis", "syn"} and len(out) == 9
+    assert set(out["mask"]) == {"plof", "dmis", "syn"} and len(out) == 12 and out["se"].isna().sum() == 3
+
+
+def test_nan_se_rows_survive_schema_validate(records, qc):
+    df = genebass.build_trait("ldl", [genebass.normalize_analysis(records, qc, "syn", 1000)])
+    assert df["se"].isna().sum() == 1
+    assert len(schema.validate(df)) == len(df)
 
 
 def test_two_analysis_trait_is_ivw_combined(records, qc):
