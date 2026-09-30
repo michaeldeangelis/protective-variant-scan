@@ -26,7 +26,7 @@ L_DISCOVERY_P_PRINTED = 1.9e-7
 L_ADVERSE_P = 0.05 / 9                        # 5.556e-3
 L_REPL_ONE_SIDED_P = 0.05
 L_LAMBDA_GC_MAX = 1.10                        # strict: lambda_GC < 1.10
-L_SYN_HITS_MAX = 0                            # Amendment 1: zero synonymous genes at threshold
+L_SYN_HITS_MAX = 0                            # Amendment 1 zero-hit gate; SUPERSEDED by Amendment 2 (A2b), kept for the record
 
 # direction of benefit: +1 higher is better, -1 lower is better
 L_PANEL = dict(
@@ -70,7 +70,10 @@ L_A1FREQ_MAX = 0.5                                    # C10b adapter guard
 # Update only together with a dated ledger entry.
 # Pin history: 7507f535... (C10) replaced by the C11 config, which adds only syn_max_p1_fraction and replication_sign_max_p
 # (reviewer diff of config/prereg.yaml against the C10 version, and an independent shasum, both checked).
-L_CONFIG_SHA256 = "7ce18c381814ba0bdfbd56ff6afa236a413bba5752517ebb901b1de74f834b83"
+L_CONFIG_SHA256 = "be69827539daac4c78b4c8f6ac7d931723abb41ab0e739c0505c357689310a9f"   # Amendment 2 config (was 7ce18c38... under C11)
+# Amendment 2 (post-hoc after run 1; experiments.md), typed from the ledger text
+L_SYN_CONTAM_MAX_FRACTION = 0.001                     # A2b: contaminated genes at most 0.1 percent of the genes tested
+L_A2_LABEL = "Amendment 2 (post-hoc after run 1)"
 # C11 (lead decisions on review-2), typed from experiments.md
 L_SYN_MAX_P1_FRACTION = 0.05                          # C11b: more than 5 percent of syn rows at p = 1 makes the control not evaluable
 L_REP_SIGN_MAX_P = 0.05                               # C11c: a sign-control arm is evaluable only if its p is below 0.05
@@ -175,7 +178,8 @@ def test_config_replication_source_allow_and_deny_lists(cfg_yaml):
 def test_config_controls(cfg_yaml):
     c = cfg_yaml["controls"]
     assert c["lambda_gc_max"] == L_LAMBDA_GC_MAX
-    assert c["syn_hits_max"] == L_SYN_HITS_MAX
+    assert "syn_hits_max" not in c, "A2b replaced the zero-hit gate"
+    assert c["syn_contaminated_max_fraction"] == L_SYN_CONTAM_MAX_FRACTION   # A2b
     assert c["syn_min_coverage"] == L_SYN_MIN_COVERAGE                    # C10a
     assert c["syn_min_rows"] == L_SYN_MIN_ROWS
     assert c["syn_max_p1_fraction"] == L_SYN_MAX_P1_FRACTION               # C11b
@@ -231,7 +235,8 @@ def test_config_loads_via_schema_and_derives_thresholds():
     assert c.min_tradeoffs_screened == L_MIN_TRADEOFFS_SCREENED
     assert c.replication_p == L_REPL_ONE_SIDED_P
     assert c.lambda_gc_max == L_LAMBDA_GC_MAX
-    assert c.syn_hits_max == 0
+    assert c.syn_contaminated_max_fraction == L_SYN_CONTAM_MAX_FRACTION
+    assert not hasattr(c, "syn_hits_max")
     assert c.syn_min_coverage == L_SYN_MIN_COVERAGE and c.syn_min_rows == L_SYN_MIN_ROWS
     assert c.syn_max_p1_fraction == L_SYN_MAX_P1_FRACTION and c.replication_sign_max_p == L_REP_SIGN_MAX_P
     for t, (_, s) in L_PANEL.items():
@@ -521,7 +526,7 @@ def run_ctrl(df, cfg):
 def test_controls_valid_on_clean_null_table(null_table, cfg):
     c = run_ctrl(null_table, cfg)
     assert c["negative_synonymous"]["lambda_gc"] < L_LAMBDA_GC_MAX
-    assert c["negative_synonymous"]["n_syn_hit_genes"] == 0
+    assert c["negative_synonymous"]["n_syn_hit_genes"] == 0 and c["negative_synonymous"]["n_contaminated"] == 0
     assert c["valid"] is True and c["failed"] == [] and c["not_run"] == []
 
 
@@ -577,18 +582,23 @@ def test_lambda_gc_boundary(null_table, cfg):
 
 
 def test_synonymous_hit_in_beneficial_direction_fails_control(null_table, cfg):
+    """Intent kept: one synonymous hit still fails the control when fewer than 1,000 genes are tested (A2b: 1 of 500 is 0.2 percent)."""
     df = set_row(null_table, "NULLG0001", "hand_grip_strength", "syn", "discovery",
                  beta=good("hand_grip_strength"), p=1e-9)
     c = run_ctrl(df, cfg)
-    assert c["negative_synonymous"]["n_syn_hit_genes"] == 1
+    n = c["negative_synonymous"]
+    assert n["n_syn_hit_genes"] == 1 and n["n_contaminated"] == 1 and n["n_genes_tested"] == 500
+    assert n["lambda_ok"] is True and n["contamination_ok"] is False              # fails on the contamination bound, not on lambda
     assert c["valid"] is False and "negative_synonymous" in c["failed"]
 
 
-def test_synonymous_hit_in_harmful_direction_is_not_counted(null_table, cfg):
+def test_synonymous_hit_in_harmful_direction_is_now_counted_as_contamination(null_table, cfg):
+    """Amendment 2 supersedes Amendment 1 here: the direction no longer matters (A2a, either direction)."""
     df = set_row(null_table, "NULLG0001", "hand_grip_strength", "syn", "discovery",
                  beta=bad("hand_grip_strength"), p=1e-9)
-    c = run_ctrl(df, cfg)
-    assert c["negative_synonymous"]["n_syn_hit_genes"] == 0
+    n = run_ctrl(df, cfg)["negative_synonymous"]
+    assert n["n_syn_hit_genes"] == 0                       # the old beneficial-direction panel-trait count is informational only
+    assert n["n_contaminated"] == 1 and n["contaminated_genes"] == ["NULLG0001"] and n["contamination_ok"] is False
 
 
 # ---------------- UKB-overlap: name variants a substring denylist can miss ----------------
@@ -675,10 +685,14 @@ def oracle(df):
     Returns (controls_valid, tiers, verdict) where tiers maps (gene, trait) -> letter for discovery hits.
     """
     d = df.query("cohort == 'discovery' and mask == 'plof'")
-    hits = []
+    syn_all = df.query("cohort == 'discovery' and mask == 'syn'")
+    # A2a: any synonymous hit at the discovery threshold, either direction, any trait, contaminates the gene
+    contaminated = set(r.gene for r in syn_all.itertuples() if r.p < L_DISCOVERY_P_ACCEPTED)
+    hits_all = []
     for r in d.itertuples():
         if r.trait in L_PANEL and oracle_discovery(r.beta, r.p, L_PANEL[r.trait][1]):
-            hits.append((r.gene, r.trait))
+            hits_all.append((r.gene, r.trait))
+    hits = [(g, t) for g, t in hits_all if g not in contaminated]
     rep = df.query("cohort == 'replication' and mask == 'plof'")
     rep = rep[[is_independent_source(s) for s in rep["source"]]]
     # C11a: a replication row is evidence only if se is finite and above 0 and beta is nonzero
@@ -718,13 +732,14 @@ def oracle(df):
     lam = (float(np.median(chi2.isf(np.clip(syn_inf["p"].to_numpy(), 1e-300, 1.0), 1)) / CHI2_MEDIAN)
            if len(syn_inf) else float("inf"))
     p1_fraction = (1.0 - len(syn_inf) / len(syn)) if len(syn) else 1.0
-    syn_hits = [r for r in syn.itertuples() if r.trait in L_PANEL and oracle_discovery(r.beta, r.p, L_PANEL[r.trait][1])]
+    n_tested = len(set(syn["gene"]))
 
     def rowof(g, t):
         x = d[(d["gene"] == g) & (d["trait"] == t)]
         return x.iloc[0] if len(x) else None
 
-    ok = lam < L_LAMBDA_GC_MAX and len(syn_hits) == 0 and p1_fraction <= L_SYN_MAX_P1_FRACTION + 1e-12
+    ok = lam < L_LAMBDA_GC_MAX and p1_fraction <= L_SYN_MAX_P1_FRACTION + 1e-12
+    ok = ok and n_tested > 0 and len(contaminated) * 1000 <= n_tested                          # A2b: at most 0.1 percent, exact integer test
     plof_pairs = set(zip(d["gene"], d["trait"]))
     syn_pairs = set(zip(syn["gene"], syn["trait"]))
     coverage = (len(plof_pairs.intersection(syn_pairs)) / len(plof_pairs)) if plof_pairs else 0.0
@@ -737,7 +752,7 @@ def oracle(df):
     ok = ok and len(signs) >= 1 and all(signs)
     x = rowof("PCSK9", "ldl")
     ok = ok and x is not None and oracle_discovery(x.beta, x.p, -1)
-    ok = ok and ("PCSK9", "ldl") in tiers                                                       # C11d: discovery path, any tier
+    ok = ok and ("PCSK9", "ldl") in hits_all                                                   # C11d + A2: discovery path, contamination irrelevant
     x = rowof("PCSK9", "coronary_disease")
     ok = ok and x is not None and x.beta < 0
     tg = [rowof(g, "triglycerides") for g in ("ANGPTL4", "APOC3")]
@@ -779,7 +794,7 @@ def scenario_runs(synth, tmp_path_factory):
     """Each synthetic scenario written to disk and run through the real CLI once."""
     runs = dict()
     for name in ("pass", "lead", "nolead", "broken_positive", "broken_lambda", "broken_syn_hit", "broken_rep_sign",
-                 "unscreened"):
+                 "unscreened", "contaminated_tierA", "contaminated_systemic", "contaminated_minor"):
         d = tmp_path_factory.mktemp("scn_" + name)
         tables = synth.make_synthetic(name, n_genes=N_GENES)
         write_tables(tables, d)
@@ -791,7 +806,8 @@ def scenario_runs(synth, tmp_path_factory):
 @pytest.mark.parametrize("name,verdict", [("pass", "PASS"), ("lead", "LEAD"), ("nolead", "KILL"),
                                           ("broken_positive", "KILL"), ("broken_lambda", "KILL"),
                                           ("broken_syn_hit", "KILL"), ("broken_rep_sign", "KILL"),
-                                          ("unscreened", "KILL")])
+                                          ("unscreened", "KILL"), ("contaminated_tierA", "LEAD"),
+                                          ("contaminated_systemic", "KILL"), ("contaminated_minor", "PASS")])
 def test_scenario_verdict_matches_ledger_rules(scenario_runs, name, verdict):
     tables, res, _ = scenario_runs[name]
     assert res["verdict"]["verdict"] == verdict
@@ -817,10 +833,20 @@ def test_results_json_and_report_contain_required_sections(scenario_runs):
         assert needle in text, needle
 
 
-def test_trivial_rung_is_the_synonymous_mask(scenario_runs):
-    _, res, _ = scenario_runs["broken_syn_hit"]
-    assert res["rungs"]["trivial"]["n_genes"] == 1
+def test_trivial_rung_is_the_synonymous_mask(base_big, tmp_path):
+    """Trivial rung (Amendment 1): beneficial-direction panel-trait synonymous hits. Kept as such after Amendment 2, which
+    adds the wider contamination list next to it (either direction, any trait)."""
+    def edit(df):
+        setrow(df, "SYNSYN1", "hand_grip_strength", "syn", "discovery", z=zgood("hand_grip_strength", 7))       # counts
+        setrow(df, "SYNG00000", "bmi", "syn", "discovery", z=zbad("bmi", 7))                                    # harmful: contamination only
+    res, _ = mutated_run(base_big, edit, tmp_path)
     assert res["controls"]["negative_synonymous"]["syn_hit_genes"] == ["SYNSYN1"]
+    assert res["rungs"]["trivial"]["n_genes"] == 1
+    assert res["contamination"]["n_contaminated"] == 2 and res["controls"]["valid"] is True
+    assert res["rungs"]["trivial"]["status"] == "RUN"
+
+
+def test_trivial_rung_is_zero_on_a_clean_table(scenario_runs):
     _, res0, _ = scenario_runs["pass"]
     assert res0["rungs"]["trivial"]["n_genes"] == 0
 
@@ -873,6 +899,12 @@ def zbad(trait, mag):
 
 
 @pytest.fixture(scope="module")
+def base_big(synth):
+    """Pass scenario with more than 2,000 genes, so that a couple of contaminated genes stay within the 0.1 percent bound."""
+    return all_rows(synth.make_synthetic("pass", n_genes=2100)).copy()
+
+
+@pytest.fixture(scope="module")
 def base_frames(synth):
     return dict((n, all_rows(synth.make_synthetic(n, n_genes=N_GENES)).copy()) for n in ("pass", "lead"))
 
@@ -920,7 +952,10 @@ def edit_lambda_high(df):
 
 
 def edit_syn_hit(df):
-    setrow(df, "SYNPASS1", "hand_grip_strength", "syn", "discovery", z=zgood("hand_grip_strength", 7))
+    """Systemic contamination: three null genes with synonymous hits (either direction, different traits): 3 of ~509 genes."""
+    setrow(df, "SYNG00000", "hand_grip_strength", "syn", "discovery", z=zgood("hand_grip_strength", 7))
+    setrow(df, "SYNG00001", "bmi", "syn", "discovery", z=zbad("bmi", 7))
+    setrow(df, "SYNG00002", "coronary_disease", "syn", "discovery", z=zgood("coronary_disease", 7))
 
 
 def edit_flip_rep_sign_controls(df):
@@ -960,11 +995,17 @@ def test_lambda_gc_just_below_limit_still_passes(base_frames, tmp_path):
     assert res["verdict"]["verdict"] == "PASS"
 
 
-def test_synonymous_hit_harmful_direction_does_not_kill(base_frames, tmp_path):
+def test_synonymous_hit_harmful_direction_does_not_kill_but_excludes_the_gene(base_big, tmp_path):
+    """Intent kept: one synonymous hit within the bound does not kill. A2a: the gene is excluded, whichever direction."""
     def edit(df):
         setrow(df, "SYNPASS1", "hand_grip_strength", "syn", "discovery", z=zbad("hand_grip_strength", 7))
-    res, _ = mutated_run(base_frames["pass"], edit, tmp_path)
-    assert res["controls"]["valid"] is True and res["verdict"]["verdict"] == "PASS"
+    res, df = mutated_run(base_big, edit, tmp_path)
+    assert res["controls"]["valid"] is True
+    assert ("SYNPASS1", "systolic_bp") not in result_tiers(res)               # would have been Tier A
+    assert res["verdict"]["verdict"] == "LEAD" and res["verdict"]["pass_genes"] == []
+    assert res["verdict"]["contaminated_excluded"] == ["SYNPASS1"]
+    ok, tiers, o_verdict = oracle(df)
+    assert ok and o_verdict == "LEAD" and ("SYNPASS1", "systolic_bp") not in tiers
 
 
 def _rename_gene(old, new):
@@ -1135,6 +1176,14 @@ def _fuzz_table(seed, n_genes=60):
                 if rng.random() < 0.6:
                     p3 = float(10 ** rng.uniform(-6, 0))
                     rows.append(R(g, out, "plof", cohort, float(rng.normal()), p3))
+        if rng.random() < 0.15:                                       # A2a: synonymous hit, any trait, either direction
+            t_syn = str(rng.choice(panel + list(L_TRADEOFF)))
+            p_syn = float(10 ** rng.uniform(-9, -6))
+            while 1.89e-7 <= p_syn <= 1.93e-7:
+                p_syn = float(10 ** rng.uniform(-9, -6))
+            rows.append(R(g, t_syn, "syn", "discovery", float(rng.choice([-0.4, 0.4])), p_syn))
+        if rng.random() < 0.3:                                        # ordinary null synonymous row (no hit), a trait the hit cannot use
+            rows.append(R(g, "triglycerides", "syn", "discovery", 0.0, float(rng.uniform(0.01, 1.0))))
     return T(rows)
 
 
@@ -1538,10 +1587,10 @@ def _run_with_config(synth, tmp_path, text, scenario="pass"):
 
 
 def test_c10c_edited_config_is_stamped_non_preregistered_everywhere(synth, tmp_path):
-    """R-3 probe: syn_hits_max 3 with a synonymous hit used to give PASS with no flag."""
-    text = CONFIG_PATH.read_text().replace("syn_hits_max: 0", "syn_hits_max: 3")
+    """R-3 probe: a loosened control (here syn_max_p1_fraction 0.05 to 0.5) must be stamped, whatever the verdict."""
+    text = CONFIG_PATH.read_text().replace("syn_max_p1_fraction: 0.05", "syn_max_p1_fraction: 0.5")
     assert text != CONFIG_PATH.read_text()
-    res, out = _run_with_config(synth, tmp_path, text, scenario="broken_syn_hit")
+    res, out = _run_with_config(synth, tmp_path, text, scenario="pass")
     assert res["config_matches_ledger"] is False and res["verdict"]["config_matches_ledger"] is False
     assert "NON-PREREGISTERED" in res["verdict"]["label"]
     assert res["config_sha256"] != L_CONFIG_SHA256 and res["config_sha256_pinned"] == L_CONFIG_SHA256
@@ -1576,7 +1625,7 @@ def test_c10c_cli_exit_codes(synth, tmp_path):
     d = tmp_path / "data"
     write_tables(synth.make_synthetic("pass", n_genes=N_GENES), d)
     edited = tmp_path / "edited.yaml"
-    edited.write_text(CONFIG_PATH.read_text().replace("syn_hits_max: 0", "syn_hits_max: 3"))
+    edited.write_text(CONFIG_PATH.read_text().replace("syn_max_p1_fraction: 0.05", "syn_max_p1_fraction: 0.5"))
     bad = subprocess.run([sys.executable, "-m", "protscan", "run", "--config", str(edited), "--data", str(d),
                           "--out", str(tmp_path / "bad" / "r.json")], capture_output=True, text=True, env=env, cwd=str(ROOT))
     assert bad.returncode == 2 and "NON-PREREGISTERED" in bad.stderr
@@ -2030,9 +2079,232 @@ def test_c11a_adverse_screen_is_deliberately_not_filtered_by_informativeness(cfg
 
 def test_c11d_positive_control_still_requires_the_pipeline_discovery_hit(null_table, cfg, monkeypatch):
     """If the pipeline's own hit path does not return PCSK9/LDL, the control fails even though the direct row test passes."""
-    monkeypatch.setattr(tiering, "build_hits", lambda d, c: pd.DataFrame(columns=["gene", "trait", "tier"]))
+    empty = pd.DataFrame(columns=["gene", "trait", "beta", "se", "p", "n_carriers"])
+    monkeypatch.setattr(stats, "discovery_hits", lambda d, c, mask="plof": empty)
     c = controls.positive_controls(validate(null_table), cfg)
     ldl = [p for p in c if p["id"] == "pcsk9_ldl_lower"][0]
-    assert ldl["status"] == "FAIL" and ldl["tested"][0]["pipeline_tier"] is None
+    assert ldl["status"] == "FAIL"
     # controls not routed through the hit path (coronary direction, triglycerides) are unaffected
     assert [p["status"] for p in c if p["id"] != "pcsk9_ldl_lower"] == ["OK", "OK"]
+
+
+# ======================================================================================
+# (g) Amendment 2 (post-hoc after run 1): A2a contamination filter, A2b contamination bound
+# ======================================================================================
+def syn_row(gene, trait, beta, p):
+    return R(gene, trait, "syn", "discovery", beta, p)
+
+
+def contam_of(rows, cfg):
+    return stats.contaminated_genes(T(rows), cfg)
+
+
+# ---------------- A2a: definition of a contaminated gene ----------------
+@pytest.mark.parametrize("trait", sorted(L_PANEL) + list(L_TRADEOFF) + ["triglycerides"])
+@pytest.mark.parametrize("sign", [+1, -1])
+def test_a2a_any_trait_and_either_direction_contaminates(trait, sign, cfg):
+    got = contam_of([syn_row("GC", trait, sign * 0.5, 1e-9)], cfg)
+    assert list(got) == ["GC"] and got["GC"][0]["trait"] == trait
+
+
+@pytest.mark.parametrize("p,contaminated", [(1.0e-7, True), (1.89e-7, True), (1.9e-7, False), (2.0e-7, False), (1e-5, False)])
+def test_a2a_threshold_is_the_discovery_threshold_strict(p, contaminated, cfg):
+    assert (len(contam_of([syn_row("GC", "ldl", -0.5, p)], cfg)) == 1) == contaminated
+
+
+@pytest.mark.parametrize("mask,cohort", [("plof", "discovery"), ("dmis", "discovery"), ("syn", "replication"), ("syn", "discovery_eur")])
+def test_a2a_only_discovery_cohort_synonymous_rows_contaminate(mask, cohort, cfg):
+    rows = [R("GC", "ldl", mask, cohort, -0.5, 1e-12)]
+    assert contam_of(rows, cfg) == dict()
+
+
+def test_a2a_records_every_hit_trait_and_counts_the_gene_once(cfg):
+    got = contam_of([syn_row("GC", "ldl", -0.5, 1e-9), syn_row("GC", "bmi", +0.5, 1e-12), syn_row("GD", "fev1", 0.4, 1e-8)], cfg)
+    assert sorted(got) == ["GC", "GD"] and sorted(h["trait"] for h in got["GC"]) == ["bmi", "ldl"]
+
+
+# ---------------- A2a: excluded from ALL tiers and candidate lists ----------------
+def _tier_fixture_genes():
+    """One gene per tier letter, each with a clean twin, all with full trade-off screening."""
+    rows = []
+    rows += sbp_replicated_gene("XA") + sbp_replicated_gene("CA")                                   # A
+    rows += hit_rows("XB", "fluid_intelligence") + null_tradeoffs("XB")                             # B
+    rows += hit_rows("CB", "fluid_intelligence") + null_tradeoffs("CB")
+    for g in ("XC", "CC"):                                                                          # C
+        rows += drop_rows(sbp_replicated_gene(g), g, "coronary_disease", "discovery")
+        rows.append(R(g, "coronary_disease", "plof", "discovery", +0.9, 1e-5))
+    for g in ("XD", "CD"):                                                                          # D
+        rows += hit_rows(g, "systolic_bp") + null_tradeoffs(g)
+        rows.append(R(g, "hypertension", "plof", "replication", bad("hypertension"), 0.4))
+    return rows
+
+
+def test_a2a_contaminated_gene_is_excluded_in_every_tier_and_clean_twin_is_kept(cfg):
+    rows = _tier_fixture_genes()
+    before = tier_map(rows, cfg)
+    assert [before[("XA", "systolic_bp")], before[("XB", "fluid_intelligence")], before[("XC", "systolic_bp")],
+            before[("XD", "systolic_bp")]] == ["A", "B", "C", "D"]
+    assert before[("CA", "systolic_bp")] == "A" and before[("CD", "systolic_bp")] == "D"
+    for g, tr in (("XA", "fev1"), ("XB", "ldl"), ("XC", "coronary_disease"), ("XD", "hand_grip_strength")):
+        rows.append(syn_row(g, tr, (+1 if g in ("XA", "XC") else -1) * 0.5, 1e-9))                 # both directions, various traits
+    after = tier_map(rows, cfg)
+    assert not [k for k in after if k[0] in ("XA", "XB", "XC", "XD")]
+    assert after[("CA", "systolic_bp")] == "A" and after[("CB", "fluid_intelligence")] == "B"
+    assert after[("CC", "systolic_bp")] == "C" and after[("CD", "systolic_bp")] == "D"
+
+
+def test_a2a_exclusion_reaches_verdict_qualification_and_candidate_lists(cfg):
+    from protscan.run import decide
+    rows = sbp_replicated_gene("XA") + hit_rows("XB", "fluid_intelligence") + null_tradeoffs("XB")
+    rows += [syn_row("XA", "bmi", +0.5, 1e-9), syn_row("XB", "bmi", -0.5, 1e-9)]
+    hits = tiering.build_hits(T(rows), cfg)
+    assert len(hits) == 0
+    v = decide(CTRL_OK, hits)
+    assert v["verdict"] == "KILL" and v["pass_genes"] == [] and v["lead_genes"] == []
+
+
+def test_a2a_contaminated_control_genes_still_pass_their_controls_and_leave_the_tiers(null_table, cfg):
+    """PCSK9, APOC3, ANGPTL4 and LDLR are not candidates: contamination must not corrupt control status."""
+    df = null_table.copy()
+    extra = [syn_row("PCSK9", "ldl", 0.3, 1e-12), syn_row("APOC3", "triglycerides", 0.3, 1e-12),
+             syn_row("ANGPTL4", "bmi", -0.3, 1e-12)]
+    df = pd.concat([df, pd.DataFrame(extra, columns=COLUMNS)], ignore_index=True)
+    c = controls.run_controls(validate(df), cfg)
+    assert [p["status"] for p in c["positive"]] == ["OK", "OK", "OK"]
+    assert c["replication_sign"]["status"] == "OK"
+    assert c["negative_synonymous"]["n_contaminated"] == 3
+    hits = tiering.build_hits(validate(df), cfg)
+    assert "PCSK9" not in set(hits["gene"])                                      # excluded from the candidate tiers
+
+
+def test_a2a_contaminated_ldlr_does_not_touch_the_replication_sign_control(null_table, cfg):
+    df = pd.concat([null_table, pd.DataFrame([syn_row("LDLR", "ldl", 0.3, 1e-12)], columns=COLUMNS)], ignore_index=True)
+    assert controls.run_controls(validate(df), cfg)["replication_sign"]["status"] == "OK"
+
+
+# ---------------- A2b: contamination bound is 0.1 percent of GENES tested ----------------
+def _universe_table(n_genes, traits, contaminated):
+    """n_genes x len(traits) null plof and syn rows; `contaminated` maps gene index to a list of (trait, sign) synonymous hits."""
+    rng = np.random.default_rng(5)
+    rows = []
+    u = rng.uniform(0.01, 0.99, size=(n_genes, len(traits)))
+    for i in range(n_genes):
+        for j, t in enumerate(traits):
+            rows.append(R("U%d" % i, t, "plof", "discovery", 0.0, float(u[i, j])))
+            hit = [x for x in contaminated.get(i, []) if x[0] == t]
+            if hit:
+                rows.append(syn_row("U%d" % i, t, hit[0][1] * 0.5, 1e-9))
+            else:
+                rows.append(syn_row("U%d" % i, t, 0.0, float(1.0 - u[i, j] * 0.9)))
+    return T(rows)
+
+
+TEN_TRAITS = ["fev1", "bmi", "ldl", "fluid_intelligence", "reaction_time", "hand_grip_strength", "resting_heart_rate",
+              "systolic_bp", "parental_lifespan", "walking_pace"]
+
+
+@pytest.mark.parametrize("n_genes,k,ok", [(1000, 1, True), (1000, 2, False), (2000, 2, True), (2000, 3, False),
+                                          (3000, 3, True), (3000, 4, False)])
+def test_a2b_bound_is_exactly_one_in_a_thousand_genes(n_genes, k, ok, cfg):
+    contam = dict((i, [(TEN_TRAITS[i % 10], +1 if i % 2 else -1)]) for i in range(k))     # both directions, different traits
+    n = controls.negative_control(_universe_table(n_genes, TEN_TRAITS, contam), cfg)
+    assert n["n_contaminated"] == k and n["n_genes_tested"] == n_genes
+    assert L_SYN_CONTAM_MAX_FRACTION == 0.001 and (k * 1000 <= n_genes) == ok
+    assert n["contamination_ok"] is ok
+    assert n["status"] == ("OK" if ok else "FAIL")
+
+
+def test_a2b_denominator_is_genes_tested_not_rows_and_a_gene_counts_once(cfg):
+    """1,000 genes x 10 traits = 10,000 rows. One gene with hits on 3 traits is ONE contaminated gene: 1/1000, within the bound.
+    Two genes are 0.2 percent of genes: over the bound (a rows denominator would say 0.02 percent)."""
+    one = controls.negative_control(_universe_table(1000, TEN_TRAITS, dict([(0, [(TEN_TRAITS[0], 1), (TEN_TRAITS[1], -1), (TEN_TRAITS[2], 1)])])), cfg)
+    assert one["n_contaminated"] == 1 and one["contamination_ok"] is True and one["status"] == "OK"
+    two = controls.negative_control(_universe_table(1000, TEN_TRAITS, dict([(0, [(TEN_TRAITS[0], 1)]), (1, [(TEN_TRAITS[1], -1)])])), cfg)
+    assert two["n_contaminated"] == 2 and two["contamination_ok"] is False and two["status"] == "FAIL"
+
+
+def test_a2b_lambda_and_other_gates_are_unchanged_by_the_new_bound(null_table, cfg):
+    n = neg_of(flat_syn_lambda(null_table, 1.101), cfg)
+    assert n["lambda_ok"] is False and n["status"] == "FAIL" and n["n_contaminated"] == 0
+    assert neg_of(null_table.iloc[:0], cfg)["status"] == "NOT RUN"
+
+
+def test_a2b_old_zero_hit_gate_is_gone_but_reported_as_information(base_big, tmp_path):
+    def edit(df):
+        setrow(df, "SYNSYN1", "hand_grip_strength", "syn", "discovery", z=zgood("hand_grip_strength", 7))     # beneficial panel hit
+    res, df = mutated_run(base_big, edit, tmp_path)
+    n = res["controls"]["negative_synonymous"]
+    assert n["n_syn_hit_genes"] == 1 and n["contamination_ok"] is True and res["controls"]["valid"] is True
+    assert "syn_hits_ok" not in n and "syn_hits_max" not in n
+    ok, _, o_verdict = oracle(df)
+    assert ok and o_verdict == res["verdict"]["verdict"]
+
+
+def test_a2b_end_to_end_systemic_contamination_is_kill_control_failed(scenario_runs):
+    _, res, d = scenario_runs["contaminated_systemic"]
+    n = res["controls"]["negative_synonymous"]
+    assert n["contamination_ok"] is False and n["n_contaminated"] > n["n_genes_tested"] * 0.001
+    assert res["verdict"]["verdict"] == "KILL" and res["verdict"]["reason"].startswith("control_failed")
+    assert res["contamination"]["within_bound"] is False
+    assert "FAIL" in (d / "out" / "report.md").read_text()
+
+
+# ---------------- A2: scenarios, oracle, and the required disclosure ----------------
+def test_a2_contaminated_tier_a_gene_is_excluded_and_verdict_degrades_pass_to_lead(scenario_runs):
+    _, res, _ = scenario_runs["contaminated_tierA"]
+    assert res["controls"]["valid"] is True
+    assert ("SYNPASS1", "systolic_bp") not in result_tiers(res) and res["verdict"]["pass_genes"] == []
+    assert res["verdict"]["verdict"] == "LEAD" and res["verdict"]["contaminated_excluded"] == ["SYNPASS1"]
+    row = [g for g in res["contamination"]["genes"] if g["gene"] == "SYNPASS1"][0]
+    assert row["excluded_plof_hit_traits"] == ["systolic_bp"] and row["syn_hits"][0]["trait"] == "systolic_bp"
+
+
+def test_a2_one_contaminated_null_gene_below_the_bound_leaves_the_verdict_alone(scenario_runs):
+    _, res, _ = scenario_runs["contaminated_minor"]
+    assert res["controls"]["negative_synonymous"]["n_contaminated"] == 1 and res["controls"]["valid"] is True
+    assert res["verdict"]["verdict"] == "PASS" and res["verdict"]["pass_genes"] == ["SYNPASS1"]
+
+
+@pytest.mark.parametrize("name", ["pass", "contaminated_tierA", "contaminated_systemic", "contaminated_minor", "broken_syn_hit"])
+def test_a2_verdict_block_label_report_and_cli_carry_the_disclosure(name, scenario_runs):
+    _, res, d = scenario_runs[name]
+    assert res["verdict"]["amendment"] == L_A2_LABEL and L_A2_LABEL in res["verdict"]["label"]
+    assert res["contamination"]["amendment"] == L_A2_LABEL
+    text = (d / "out" / "report.md").read_text()
+    assert "Rules active: **%s**" % L_A2_LABEL in text and "never a clean preregistered pass" in text
+    assert "## Contaminated genes (A2a)" in text
+    saved = json.loads((d / "out" / "protective-scan.json").read_text())
+    assert saved["verdict"]["amendment"] == L_A2_LABEL
+
+
+def test_a2_cli_stdout_states_the_amendment(synth, tmp_path):
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(ROOT / "src")
+    d = tmp_path / "data"
+    write_tables(synth.make_synthetic("pass", n_genes=N_GENES), d)
+    out = subprocess.run([sys.executable, "-m", "protscan", "run", "--config", str(CONFIG_PATH), "--data", str(d),
+                          "--out", str(tmp_path / "o" / "r.json")], capture_output=True, text=True, env=env, cwd=str(ROOT))
+    assert out.returncode == 0 and L_A2_LABEL in out.stdout
+
+
+def test_a2_report_is_not_silent_about_excluded_genes(scenario_runs):
+    _, res, d = scenario_runs["contaminated_tierA"]
+    text = (d / "out" / "report.md").read_text()
+    section = text.split("## Contaminated genes (A2a)")[1].split("## Baseline ladder")[0]
+    assert "SYNPASS1" in section and "systolic_bp" in section
+
+
+# ---------------- review-4 residual gaps (non-strict xfail) ----------------
+@pytest.mark.xfail(strict=False, reason="R4-1: a pLoF hit gene with no synonymous row cannot be assessed by A2a and is not flagged")
+def test_a2a_hit_gene_without_any_synonymous_row_is_flagged_as_unassessed(cfg):
+    rows = sbp_replicated_gene("GA") + [syn_row("OTHER", "ldl", 0.0, 0.5)]
+    hits = tiering.build_hits(T(rows), cfg)
+    assert list(hits["tier"]) == ["A"]                                       # present in the tiers ...
+    assert "syn_assessed" in hits.columns and bool(hits["syn_assessed"].iloc[0]) is False     # ... but flagged
+
+
+@pytest.mark.xfail(strict=False, reason="R4-3: results ledger_entry header still reads 'with AMENDMENT 1' under Amendment 2 rules")
+def test_a2_ledger_entry_header_names_amendment_2(scenario_runs):
+    _, res, d = scenario_runs["pass"]
+    assert "amendment 2" in res["ledger_entry"].lower()
+    assert "amendment 2" in (d / "out" / "report.md").read_text().split("## Verdict")[0].lower()
