@@ -165,3 +165,31 @@ The user registered for FinnGen summary-statistics access (confirmation email fr
 - C11c (R2-3): In the replication-sign control (C10b), an arm (PCSK9 negative, LDLR positive) is evaluable only if its p < 0.05. At least one arm must be evaluable and every evaluable arm must match its expected sign; otherwise KILL, with the reason recorded as "sign_control_not_evaluable" (no evaluable arm) or "sign_control_failed" (an evaluable arm has the wrong sign). Underpowered arms never count as failures.
 - C11d (R2-5): The positive controls (PCSK9 LDL-lowering; ANGPTL4 or APOC3 triglyceride-lowering) are judged on the discovery effect only (direction and discovery threshold). The trade-off screen, including PCSK9 and type 2 diabetes, never changes control status.
 - Reading rule for any KILL involving the sign control or positive controls: report it as a pipeline/data conclusion only after checking C11c and C11d; a biology conclusion requires all controls valid.
+
+## 2026-09-29 protective-variant-scan RUN 1 RESULT   (appended; the rules above were not changed for this run)
+
+Run: `python -m protscan run --config config/prereg.yaml --data data --out results/protective-scan.json` at commit 2b373c3, config sha256 7ce18c38... (config_matches_ledger = true, not synthetic). Record: results/run1-protective-scan.json and results/run1-report.md (renamed after the run so run 2 cannot overwrite them). Tier and gene lists in those files were NOT opened by the lead before the amendment below was written.
+
+Controls (calibration only):
+| Control | Result |
+|---|---|
+| Positive: PCSK9 LDL-lowering | OK, beta -0.0389, p 3.6e-132 |
+| Positive: PCSK9 coronary protective | OK (direction), beta -0.0296, p 1.4e-3 |
+| Positive: APOC3 triglyceride-lowering | OK, beta -0.0493, p 1e-300 (floor) |
+| Replication sign: LDLR (expected +) | OK, beta +2.885, p 1.7e-19 |
+| Replication sign: PCSK9 (expected -) | NOT RUN, no informative row; allowed by C11c since one arm evaluated |
+| Synonymous: lambda_GC (p<1 rows) | 1.070 (all rows 1.056), limit 1.10: OK |
+| Synonymous: coverage / rows / p=1 fraction | 99.9% / 334,441 / 0.57%: OK |
+| Synonymous: beneficial-direction hits at discovery threshold | 3 genes (CD3EAP, HPR, ZNF224); limit 0: FAIL |
+
+Verdict by the pre-written rule: KILL (control_failed: negative_synonymous). The pipeline is invalid as specified; this verdict stands. It is not a biological conclusion (C11 reading rule: all controls must be valid for one).
+What this shows: discovery and FinnGen effect-sign conventions reproduce known biology. Global inflation is small. Three genes show a beneficial-direction signal in a mask that cannot reflect loss of function. About 334,000 synonymous rows tested at 1.9e-7 would yield about 0.06 hits by chance, so 3 is not chance.
+Interpretation, UNVERIFIED (from memory; the local constraint table has no coordinates): CD3EAP and ZNF224 lie in the APOE/TOMM40 region (chr19q13.32) and HPR beside HP (chr16q22), regions with strong common-variant associations. A synonymous burden there most plausibly picks up common variants in linkage disequilibrium, which would contaminate pLoF burden results in the same regions.
+
+## 2026-09-29 protective-variant-scan AMENDMENT 2   (written after run 1 failed a control, before any tier or gene list was opened)
+
+Honest framing: this changes the negative control after seeing it fail. Run 1 stands as KILL under the original rule. Run 2 is a new run under the rules below; if it passes, it is reported as "passed under Amendment 2, which was written after run 1 failed", never as a clean preregistered pass.
+- A2a (contamination filter): any gene with a synonymous-mask hit at the discovery threshold (1.9e-7, either direction, any trait) is CONTAMINATED. Contaminated genes are excluded from all tiers and candidate lists and are listed in the report with the trait(s).
+- A2b (control gate): the negative control is valid iff lambda_GC < 1.10, coverage >= 90 percent, >= 10,000 rows, p = 1 fraction <= 5 percent (all unchanged), AND contaminated genes number at most 0.1 percent of the genes tested (about 18 of roughly 18,500). Beyond that the contamination is systemic: KILL. The 0.1 percent bound was chosen knowing run 1 had 3; it is a post-hoc bound and is disclosed as a limitation.
+- A2c (locus caveat, manual): every PASS or LEAD gene is reported with its chromosome position and a GWAS Catalog lookup of the same trait within 500 kb, recorded in the ledger. Such a neighbouring signal downgrades the gene to "locus-contaminated lead" and it does not count toward PASS or LEAD.
+- A2d: everything else (thresholds, panel, tiers, C1-C11, proxies, verdict definitions) is unchanged. The config pin changes only with the implementing commit, and run 2 is not started until the reviewer re-verifies.

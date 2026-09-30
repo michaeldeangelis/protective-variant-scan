@@ -1,0 +1,427 @@
+{
+  "ledger_entry": "2026-09-29 protective-variant-scan (with AMENDMENT 1)",
+  "config_sha256": "7ce18c381814ba0bdfbd56ff6afa236a413bba5752517ebb901b1de74f834b83",
+  "config_sha256_pinned": "7ce18c381814ba0bdfbd56ff6afa236a413bba5752517ebb901b1de74f834b83",
+  "config_matches_ledger": true,
+  "data": {
+    "dir": "data",
+    "files": [
+      "burden_finngen.csv.gz",
+      "burden_genebass.csv.gz"
+    ],
+    "n_rows": 1025318,
+    "dropped_nan_rows": 0,
+    "sources": {
+      "discovery": [
+        "genebass"
+      ],
+      "replication": [
+        "finngen_r13"
+      ]
+    },
+    "synthetic": false,
+    "traits_absent": {
+      "discovery": [
+        "all_cause_mortality",
+        "education_years",
+        "numeric_memory",
+        "pairs_matching_errors",
+        "walking_pace"
+      ],
+      "replication": [
+        "all_cause_mortality",
+        "fracture"
+      ]
+    },
+    "constraint_file": true,
+    "replication_sources_excluded": []
+  },
+  "thresholds": {
+    "discovery_p": 1.9e-07,
+    "replication_one_sided_p": 0.05,
+    "tradeoff_p": 0.005555555555555556,
+    "lambda_gc_max": 1.1,
+    "n_tradeoff": 9,
+    "min_tradeoffs_screened": 5,
+    "replication_sign_max_p": 0.05,
+    "syn_max_p1_fraction": 0.05
+  },
+  "controls": {
+    "negative_synonymous": {
+      "status": "FAIL",
+      "lambda_gc": 1.0697656242323363,
+      "lambda_gc_all_rows": 1.0564652723110823,
+      "lambda_gc_max": 1.1,
+      "lambda_ok": true,
+      "n_rows": 334441,
+      "syn_min_rows": 10000,
+      "coverage": 0.9993510117726464,
+      "syn_min_coverage": 0.9,
+      "n_plof_pairs": 308172,
+      "n_p1_rows": 1899,
+      "p1_fraction": 0.0056781315687968875,
+      "syn_max_p1_fraction": 0.05,
+      "n_syn_hit_genes": 3,
+      "syn_hits_max": 0,
+      "syn_hits_ok": false,
+      "syn_hit_genes": [
+        "CD3EAP",
+        "HPR",
+        "ZNF224"
+      ]
+    },
+    "positive": [
+      {
+        "id": "pcsk9_ldl_lower",
+        "trait": "ldl",
+        "genes": [
+          "PCSK9"
+        ],
+        "at_discovery_threshold": true,
+        "via_pipeline_discovery_path": true,
+        "status": "OK",
+        "tested": [
+          {
+            "gene": "PCSK9",
+            "beta": -0.0388672485138252,
+            "p": 3.5816007334609e-132,
+            "pipeline_tier": "B",
+            "ok": true
+          }
+        ]
+      },
+      {
+        "id": "pcsk9_cad_protective",
+        "trait": "coronary_disease",
+        "genes": [
+          "PCSK9"
+        ],
+        "at_discovery_threshold": false,
+        "via_pipeline_discovery_path": false,
+        "status": "OK",
+        "tested": [
+          {
+            "gene": "PCSK9",
+            "beta": -0.029574622817185,
+            "p": 0.0014296512940268,
+            "ok": true
+          }
+        ]
+      },
+      {
+        "id": "lipid_lowering",
+        "trait": "triglycerides",
+        "genes": [
+          "ANGPTL4",
+          "APOC3"
+        ],
+        "at_discovery_threshold": true,
+        "via_pipeline_discovery_path": false,
+        "status": "OK",
+        "tested": [
+          {
+            "gene": "APOC3",
+            "beta": -0.0492724359794443,
+            "p": 1e-300,
+            "ok": true
+          }
+        ]
+      }
+    ],
+    "replication_sign": {
+      "status": "OK",
+      "reason": null,
+      "checks": [
+        {
+          "id": "pcsk9_rep_sign",
+          "gene": "PCSK9",
+          "trait": "hypercholesterolemia",
+          "expected_beta_sign": -1,
+          "status": "NOT RUN",
+          "why": "no informative row"
+        },
+        {
+          "id": "ldlr_rep_sign",
+          "gene": "LDLR",
+          "trait": "hypercholesterolemia",
+          "expected_beta_sign": 1,
+          "beta": 2.88537,
+          "p": 1.7278259805078665e-19,
+          "status": "OK"
+        }
+      ]
+    },
+    "valid": false,
+    "failed": [
+      "negative_synonymous"
+    ],
+    "not_run": []
+  },
+  "rungs": {
+    "trivial": {
+      "definition": "synonymous mask, discovery rule (Amendment 1)",
+      "status": "RUN",
+      "n_genes": 3
+    },
+    "simplest": {
+      "definition": "pLoF only, one trait at a time, discovery p only; no replication, no trade-off screen",
+      "status": "RUN",
+      "n_genes": 8,
+      "n_gene_trait_pairs": 8,
+      "by_trait": {
+        "ldl": 7,
+        "bmi": 1
+      }
+    },
+    "incumbent": {
+      "status": "NOT RUN",
+      "reason": "incumbent_hits.csv not provided; published top hits are not fabricated"
+    },
+    "candidate": {
+      "definition": "pLoF + dmis consistency, independent replication, trade-off screen, tiering",
+      "status": "RUN",
+      "n_genes": 4,
+      "n_genes_by_tier": {
+        "A": 1,
+        "B": 5,
+        "C": 2,
+        "D": 0
+      },
+      "n_genes_by_tier_mask_consistent": {
+        "A": 1,
+        "B": 3,
+        "C": 1,
+        "D": 0
+      }
+    }
+  },
+  "tiers": {
+    "A": [
+      {
+        "gene": "APOC3",
+        "trait": "ldl",
+        "beta": -0.0071807803208002,
+        "se": 0.0009298226016122,
+        "p": 1.1385322683018501e-14,
+        "n_carriers": 1891,
+        "rep_status": "replicated",
+        "rep_trait": "hypercholesterolemia",
+        "rep_beta": -0.259683,
+        "rep_p_onesided": 0.0366209835606851,
+        "domain": "metabolic",
+        "adverse": [],
+        "n_tradeoff_tested": 8,
+        "harmful_panel": [],
+        "tradeoff_unscreened": false,
+        "mask_status": "consistent",
+        "eur_status": "not_reported",
+        "tier": "A",
+        "lipid_gene": true,
+        "qualifies": false,
+        "loeuf": 1.68
+      }
+    ],
+    "B": [
+      {
+        "gene": "APOB",
+        "trait": "ldl",
+        "beta": -0.0465076946215134,
+        "se": 0.0012573807055339,
+        "p": 1.80159708958447e-299,
+        "n_carriers": 907,
+        "rep_status": "gene_untested",
+        "rep_trait": null,
+        "rep_beta": null,
+        "rep_p_onesided": null,
+        "domain": "metabolic",
+        "adverse": [],
+        "n_tradeoff_tested": 8,
+        "harmful_panel": [],
+        "tradeoff_unscreened": false,
+        "mask_status": "inconsistent",
+        "eur_status": "not_reported",
+        "tier": "B",
+        "lipid_gene": true,
+        "qualifies": false,
+        "loeuf": 0.537
+      },
+      {
+        "gene": "PCSK9",
+        "trait": "ldl",
+        "beta": -0.0388672485138252,
+        "se": 0.0015887604425483,
+        "p": 3.5816007334609e-132,
+        "n_carriers": 336,
+        "rep_status": "gene_untested",
+        "rep_trait": null,
+        "rep_beta": null,
+        "rep_p_onesided": null,
+        "domain": "metabolic",
+        "adverse": [],
+        "n_tradeoff_tested": 8,
+        "harmful_panel": [],
+        "tradeoff_unscreened": false,
+        "mask_status": "consistent",
+        "eur_status": "not_reported",
+        "tier": "B",
+        "lipid_gene": true,
+        "qualifies": false,
+        "loeuf": 1.25
+      },
+      {
+        "gene": "ANGPTL3",
+        "trait": "ldl",
+        "beta": -0.0148005480474266,
+        "se": 0.0013860876347394,
+        "p": 1.29117323410224e-26,
+        "n_carriers": 763,
+        "rep_status": "gene_untested",
+        "rep_trait": null,
+        "rep_beta": null,
+        "rep_p_onesided": null,
+        "domain": "metabolic",
+        "adverse": [],
+        "n_tradeoff_tested": 8,
+        "harmful_panel": [],
+        "tradeoff_unscreened": false,
+        "mask_status": "consistent",
+        "eur_status": "not_reported",
+        "tier": "B",
+        "lipid_gene": true,
+        "qualifies": false,
+        "loeuf": 1.209
+      },
+      {
+        "gene": "GPR151",
+        "trait": "bmi",
+        "beta": -0.002704931645112,
+        "se": 0.000497998714276,
+        "p": 5.5849853852763e-08,
+        "n_carriers": 8236,
+        "rep_status": "gene_untested",
+        "rep_trait": null,
+        "rep_beta": null,
+        "rep_p_onesided": null,
+        "domain": "metabolic",
+        "adverse": [],
+        "n_tradeoff_tested": 8,
+        "harmful_panel": [],
+        "tradeoff_unscreened": false,
+        "mask_status": "inconsistent",
+        "eur_status": "not_reported",
+        "tier": "B",
+        "lipid_gene": false,
+        "qualifies": false,
+        "loeuf": 1.147
+      },
+      {
+        "gene": "RRBP1",
+        "trait": "ldl",
+        "beta": -0.0184159416153974,
+        "se": 0.0034725285927502,
+        "p": 1.13713302996032e-07,
+        "n_carriers": 111,
+        "rep_status": "gene_untested",
+        "rep_trait": null,
+        "rep_beta": null,
+        "rep_p_onesided": null,
+        "domain": "metabolic",
+        "adverse": [],
+        "n_tradeoff_tested": 8,
+        "harmful_panel": [],
+        "tradeoff_unscreened": false,
+        "mask_status": "consistent",
+        "eur_status": "not_reported",
+        "tier": "B",
+        "lipid_gene": false,
+        "qualifies": false,
+        "loeuf": 0.704
+      }
+    ],
+    "C": [
+      {
+        "gene": "GIGYF1",
+        "trait": "ldl",
+        "beta": -0.0225974728287563,
+        "se": 0.0031426611200678,
+        "p": 6.45291983935795e-13,
+        "n_carriers": 131,
+        "rep_status": "failed",
+        "rep_trait": "hypercholesterolemia",
+        "rep_beta": -0.754345,
+        "rep_p_onesided": 0.12564233655895266,
+        "domain": "metabolic",
+        "adverse": [
+          {
+            "trait": "type_2_diabetes",
+            "cohort": "discovery",
+            "beta": 0.0768514985830059,
+            "p_onesided": 5.785956710124199e-12
+          },
+          {
+            "trait": "major_depression",
+            "cohort": "discovery",
+            "beta": 0.0337615323461592,
+            "p_onesided": 0.0005970256465595
+          }
+        ],
+        "n_tradeoff_tested": 8,
+        "harmful_panel": [
+          {
+            "trait": "hand_grip_strength",
+            "beta": -0.0138166915935954,
+            "p": 6.90844711102873e-10
+          }
+        ],
+        "tradeoff_unscreened": false,
+        "mask_status": "consistent",
+        "eur_status": "not_reported",
+        "tier": "C",
+        "lipid_gene": false,
+        "qualifies": false,
+        "loeuf": 0.735
+      },
+      {
+        "gene": "GCK",
+        "trait": "ldl",
+        "beta": -0.0354835820268339,
+        "se": 0.0064919214867679,
+        "p": 4.60808657898326e-08,
+        "n_carriers": 37,
+        "rep_status": "gene_untested",
+        "rep_trait": null,
+        "rep_beta": null,
+        "rep_p_onesided": null,
+        "domain": "metabolic",
+        "adverse": [
+          {
+            "trait": "type_2_diabetes",
+            "cohort": "discovery",
+            "beta": 0.183144035431794,
+            "p_onesided": 9.5005813342706e-25
+          }
+        ],
+        "n_tradeoff_tested": 8,
+        "harmful_panel": [],
+        "tradeoff_unscreened": false,
+        "mask_status": "inconsistent",
+        "eur_status": "not_reported",
+        "tier": "C",
+        "lipid_gene": false,
+        "qualifies": false,
+        "loeuf": 0.866
+      }
+    ],
+    "D": []
+  },
+  "verdict": {
+    "controls_valid": false,
+    "pass_genes": [],
+    "lead_genes": [],
+    "verdict": "KILL",
+    "reason": "control_failed: negative_synonymous",
+    "synthetic": false,
+    "config_matches_ledger": true,
+    "label": "KILL"
+  }
+}
