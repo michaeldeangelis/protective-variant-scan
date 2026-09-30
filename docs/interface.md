@@ -34,8 +34,9 @@ Read from the top level of the `--data` directory only:
 
 ## Run gates the data must satisfy (Amendment 1 C10)
 
-- Synonymous control: `syn` discovery rows must number >= 10,000 and cover >= 90% of the (gene, trait) pairs that have a `plof` discovery row, else controls_not_evaluable (KILL).
-- Replication-sign control: the independent replication cohort should carry `plof` rows for `hypercholesterolemia` for PCSK9 (must be negative) and LDLR (must be positive). At least one must exist; every one present must hold. The adapter must guarantee the LoF carrier-allele sign convention (A1FREQ <= 0.5 guard).
+- Synonymous control: `syn` discovery rows must number >= 10,000 and cover >= 90% of the (gene, trait) pairs that have a `plof` discovery row, and rows with p = 1 must be at most 5% of them, else controls_not_evaluable (KILL). lambda_GC is computed on rows with p < 1 (both lambdas are reported).
+- Replication rule (C11a): a replication row counts only if se is finite and > 0 and beta is nonzero. Rows with undefined se (beta = 0 or p = 1) are kept in the table for lambda_GC and coverage counts only.
+- Replication-sign control: the independent replication cohort should carry `plof` rows for `hypercholesterolemia` for PCSK9 (must be negative) and LDLR (must be positive). An arm is evaluable only with an informative row and p < 0.05; at least one arm must be evaluable and every evaluable arm must match (`sign_control_not_evaluable` / `sign_control_failed`). The adapter must guarantee the LoF carrier-allele sign convention (A1FREQ <= 0.5 guard).
 - A data directory must not mix `synthetic*` sources with real ones; the run refuses.
 - The config sha256 is pinned in `src/protscan/schema.py`; any other config is stamped NON-PREREGISTERED and the CLI exits 2.
 

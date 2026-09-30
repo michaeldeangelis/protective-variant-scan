@@ -51,12 +51,17 @@ def independent_replication(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
     return r[_source_independent(r["source"], cfg)]
 
 
+def informative(r: pd.DataFrame) -> pd.DataFrame:
+    """C11a: rows usable as evidence: finite se > 0 and beta != 0. Other rows serve lambda_GC and coverage only."""
+    return r[np.isfinite(r["se"]) & (r["se"] > 0) & (r["beta"] != 0)]
+
+
 def replication_status(hits: pd.DataFrame, df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
     """Independent-cohort replication. Only traits with a declared proxy can replicate (Amendment 1).
 
     rep_status: replicated | failed | trait_missing | gene_untested
     """
-    rep = independent_replication(df, cfg).set_index(["gene", "trait"])
+    rep = informative(independent_replication(df, cfg)).set_index(["gene", "trait"])
     rep_traits = set(rep.index.get_level_values("trait"))
     out = []
     for g, t in zip(hits["gene"], hits["trait"]):

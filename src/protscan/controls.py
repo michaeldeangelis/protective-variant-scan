@@ -23,14 +23,21 @@ def negative_control(df: pd.DataFrame, cfg: Config) -> dict:
         return {"status": "NOT RUN", **cov,
                 "reason": f"synonymous universe too small to validate the pipeline: {len(syn)} rows (need >= {cfg.syn_min_rows}), "
                           f"coverage {coverage:.3f} of pLoF (gene, trait) pairs (need >= {cfg.syn_min_coverage})"}
-    lam = stats.lambda_gc(syn["p"])
+    n_p1 = int((syn["p"] >= 1).sum())
+    cov.update(n_p1_rows=n_p1, p1_fraction=n_p1 / len(syn), syn_max_p1_fraction=cfg.syn_max_p1_fraction)
+    if cov["p1_fraction"] > cfg.syn_max_p1_fraction:
+        return {"status": "NOT RUN", **cov,
+                "reason": f"{n_p1} of {len(syn)} synonymous rows ({cov['p1_fraction']:.3f}) have p = 1, above the allowed "
+                          f"{cfg.syn_max_p1_fraction}: lambda_GC would be dominated by uninformative rows"}
+    lam = stats.lambda_gc(syn.loc[syn["p"] < 1, "p"])          # C11b: uninformative p = 1 rows cannot deflate the gate
+    lam_all = stats.lambda_gc(syn["p"])
     hits = stats.discovery_hits(df, cfg, mask="syn")
     genes = sorted(set(hits["gene"]))
     lam_ok = lam < cfg.lambda_gc_max
     hits_ok = len(genes) <= cfg.syn_hits_max
     return {
         "status": "OK" if lam_ok and hits_ok else "FAIL",
-        "lambda_gc": lam, "lambda_gc_max": cfg.lambda_gc_max, "lambda_ok": lam_ok,
+        "lambda_gc": lam, "lambda_gc_all_rows": lam_all, "lambda_gc_max": cfg.lambda_gc_max, "lambda_ok": lam_ok,
         **cov,
         "n_syn_hit_genes": len(genes), "syn_hits_max": cfg.syn_hits_max, "syn_hits_ok": hits_ok,
         "syn_hit_genes": genes[:50],
@@ -38,8 +45,9 @@ def negative_control(df: pd.DataFrame, cfg: Config) -> dict:
 
 
 def positive_controls(df: pd.DataFrame, cfg: Config, hits: pd.DataFrame | None = None) -> list:
-    """Direction and threshold tests on the discovery plof rows. Where the trait is a panel trait and the spec
-    is at the discovery threshold, the gene must also come out of the pipeline's own hit and tier path and not be Tier C."""
+    """C11d: judged on the discovery effect only (direction and discovery threshold). Where the trait is a panel trait
+    and the spec is at the discovery threshold, the gene must also come out of the pipeline's own discovery-hit path.
+    The trade-off screen never changes control status; the tier is reported for information."""
     if hits is None:
         hits = tiering.build_hits(df, cfg)
     tier = {(g, t): k for g, t, k in zip(hits["gene"], hits["trait"], hits["tier"])}
@@ -57,13 +65,13 @@ def positive_controls(df: pd.DataFrame, cfg: Config, hits: pd.DataFrame | None =
             rec = {"gene": g, "beta": float(row["beta"]), "p": float(row["p"])}
             if via_pipeline:
                 rec["pipeline_tier"] = tier.get((g.upper(), trait))
-                ok = ok and rec["pipeline_tier"] is not None and rec["pipeline_tier"] != "C"
+                ok = ok and rec["pipeline_tier"] is not None
             rec["ok"] = ok
             tested.append(rec)
             passed = passed or ok
         out.append({
             "id": spec["id"], "trait": trait, "genes": list(spec["genes"]),
-            "at_discovery_threshold": bool(spec["at_discovery_threshold"]), "via_pipeline_tier_path": via_pipeline,
+            "at_discovery_threshold": bool(spec["at_discovery_threshold"]), "via_pipeline_discovery_path": via_pipeline,
             "status": ("OK" if passed else "FAIL") if tested else "NOT RUN",
             "tested": tested,
         })
@@ -71,23 +79,26 @@ def positive_controls(df: pd.DataFrame, cfg: Config, hits: pd.DataFrame | None =
 
 
 def replication_sign_control(df: pd.DataFrame, cfg: Config) -> dict:
-    """C10b: PCSK9 negative, LDLR positive on the hypercholesterolemia proxy in the independent replication cohort.
-    At least one check must be evaluable; every evaluable one must hold."""
-    rep = stats.independent_replication(df, cfg).set_index(["gene", "trait"])
+    """C10b + C11c: PCSK9 negative, LDLR positive on the hypercholesterolemia proxy in the independent replication cohort.
+    An arm is evaluable only if it has an informative row (C11a) with p < replication_sign_max_p; an evaluable arm must match
+    its expected sign. At least one arm must be evaluable. Underpowered arms are NOT RUN, never failures."""
+    rep = stats.informative(stats.independent_replication(df, cfg)).set_index(["gene", "trait"])
     checks = []
     for spec in cfg.replication_sign:
         key = (spec["gene"].upper(), spec["trait"])
+        rec = {"id": spec["id"], "gene": spec["gene"], "trait": spec["trait"], "expected_beta_sign": spec["expected_beta_sign"]}
         if key not in rep.index:
-            checks.append({"id": spec["id"], "gene": spec["gene"], "trait": spec["trait"],
-                           "expected_beta_sign": spec["expected_beta_sign"], "status": "NOT RUN"})
+            checks.append({**rec, "status": "NOT RUN", "why": "no informative row"})
             continue
-        beta = float(rep.loc[key, "beta"])
-        checks.append({"id": spec["id"], "gene": spec["gene"], "trait": spec["trait"],
-                       "expected_beta_sign": spec["expected_beta_sign"], "beta": beta,
-                       "status": "OK" if beta * spec["expected_beta_sign"] > 0 else "FAIL"})
+        beta, p = float(rep.loc[key, "beta"]), float(rep.loc[key, "p"])
+        if not p < cfg.replication_sign_max_p:
+            checks.append({**rec, "beta": beta, "p": p, "status": "NOT RUN", "why": f"underpowered (p >= {cfg.replication_sign_max_p})"})
+            continue
+        checks.append({**rec, "beta": beta, "p": p, "status": "OK" if beta * spec["expected_beta_sign"] > 0 else "FAIL"})
     sts = [c["status"] for c in checks]
     status = "FAIL" if "FAIL" in sts else ("OK" if "OK" in sts else "NOT RUN")
-    return {"status": status, "checks": checks}
+    reason = {"FAIL": "sign_control_failed", "NOT RUN": "sign_control_not_evaluable"}.get(status)
+    return {"status": status, "reason": reason, "checks": checks}
 
 
 def run_controls(df: pd.DataFrame, cfg: Config, hits: pd.DataFrame | None = None) -> dict:

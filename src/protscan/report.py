@@ -55,22 +55,30 @@ def render(res: dict) -> str:
         L.append(f"| synonymous coverage >= {n['syn_min_coverage']} of pLoF pairs, rows >= {n['syn_min_rows']} | OK | "
                  f"coverage = {n['coverage']:.3f} of {n['n_plof_pairs']} pairs; {n['n_rows']} rows |")
         L.append(f"| synonymous lambda_GC < {_fmt(n['lambda_gc_max'])} | {'OK' if n['lambda_ok'] else 'FAIL'} | "
-                 f"lambda_GC = {n['lambda_gc']:.3f} over {n['n_rows']} rows |")
+                 f"lambda_GC = {n['lambda_gc']:.3f} on rows with p < 1; {n['lambda_gc_all_rows']:.3f} on all {n['n_rows']} rows; "
+                 f"p = 1 rows: {n['n_p1_rows']} ({n['p1_fraction']:.3f}, max {n['syn_max_p1_fraction']}) |")
         L.append(f"| synonymous genes at discovery threshold (beneficial) <= {n['syn_hits_max']} | "
                  f"{'OK' if n['syn_hits_ok'] else 'FAIL'} | {n['n_syn_hit_genes']} genes {', '.join(n['syn_hit_genes'][:10])} |")
     for p in c["positive"]:
         det = "; ".join(f"{t['gene']} beta={t['beta']:.3g} p={t['p']:.2g}"
                         + (f" tier={t['pipeline_tier']}" if "pipeline_tier" in t else "") for t in p["tested"]) or "no rows for these genes/trait"
         thr = "at discovery threshold" if p["at_discovery_threshold"] else "beneficial direction"
-        thr += ", via pipeline tier path (not Tier C)" if p["via_pipeline_tier_path"] else ""
+        thr += ", also via the pipeline discovery-hit path (trade-offs never change status)" if p["via_pipeline_discovery_path"] else ""
         L.append(f"| {p['id']} ({'/'.join(p['genes'])}, {p['trait']}, {thr}) | {p['status']} | {det} |")
     rs = c["replication_sign"]
     for k in rs["checks"]:
-        det = f"beta={k['beta']:.3g}" if "beta" in k else "no row in independent replication cohort"
+        det = (f"beta={k['beta']:.3g} p={k['p']:.2g}" if "beta" in k else "no informative row in independent replication cohort")
+        det += f"; not evaluable: {k['why']}" if k["status"] == "NOT RUN" else ""
         want = "negative" if k["expected_beta_sign"] < 0 else "positive"
         L.append(f"| {k['id']} ({k['gene']} pLoF, {k['trait']}, expect {want}) | {k['status']} | {det} |")
-    L += ["", f"Replication-sign control (at least one check evaluable, every evaluable one must hold): **{rs['status']}**", "",
+    L += ["", f"Replication-sign control (an arm is evaluable only if p < {_fmt(res['thresholds']['replication_sign_max_p'])}; "
+          f"at least one arm evaluable, every evaluable arm must match): **{rs['status']}**"
+          + (f" ({rs['reason']})" if rs["reason"] else ""), "",
           f"Controls valid: **{c['valid']}**", ""]
+    if v["verdict"] == "KILL" and (c["failed"] or c["not_run"]):
+        L += ["Reading rule: a KILL involving the sign control or the positive controls is a pipeline/data conclusion only after checking "
+              "that the sign-control arms were adequately powered (C11c) and that the positive controls were judged on the discovery effect "
+              "alone (C11d). A biology conclusion requires all controls valid.", ""]
 
     L += ["## Baseline ladder (genes passing at each rung)", "", "| rung | status | genes | note |", "|---|---|---|---|"]
     t, s, i, k = rg["trivial"], rg["simplest"], rg["incumbent"], rg["candidate"]

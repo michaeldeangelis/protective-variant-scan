@@ -70,10 +70,14 @@ def decide(ctrl: dict, hits: pd.DataFrame) -> dict:
     a = sorted(set(q.loc[q["tier"] == "A", "gene"])) if len(q) else []
     b = sorted(set(q.loc[q["tier"] == "B", "gene"])) if len(q) else []
     base = {"controls_valid": ctrl["valid"], "pass_genes": a, "lead_genes": b}
+    rs = ctrl.get("replication_sign", {}).get("reason")
+
+    def names(ns):
+        return ", ".join(f"{n} ({rs})" if n == "replication_sign" and rs else n for n in ns)
     if ctrl["failed"]:
-        return {**base, "verdict": "KILL", "reason": "control_failed: " + ", ".join(ctrl["failed"])}
+        return {**base, "verdict": "KILL", "reason": "control_failed: " + names(ctrl["failed"])}
     if ctrl["not_run"]:
-        return {**base, "verdict": "KILL", "reason": "controls_not_evaluable (pipeline unvalidated): " + ", ".join(ctrl["not_run"])}
+        return {**base, "verdict": "KILL", "reason": "controls_not_evaluable (pipeline unvalidated): " + names(ctrl["not_run"])}
     if a:
         return {**base, "verdict": "PASS", "reason": "controls valid; non-lipid Tier-A gene with both masks consistent"}
     if b:
@@ -155,6 +159,7 @@ def run_pipeline(config_path, data_dir, out_path) -> dict:
             "discovery_p": cfg.discovery_p, "replication_one_sided_p": cfg.replication_p,
             "tradeoff_p": cfg.tradeoff_p, "lambda_gc_max": cfg.lambda_gc_max, "n_tradeoff": len(cfg.tradeoff),
             "min_tradeoffs_screened": cfg.min_tradeoffs_screened,
+            "replication_sign_max_p": cfg.replication_sign_max_p, "syn_max_p1_fraction": cfg.syn_max_p1_fraction,
         },
         "controls": ctrl,
         "rungs": _rungs(cfg, ctrl, disc, hits, incumbent),

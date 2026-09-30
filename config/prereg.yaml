@@ -78,6 +78,11 @@ controls:
   # plof discovery row AND number >= 10,000; otherwise controls_not_evaluable (KILL).
   syn_min_coverage: 0.90
   syn_min_rows: 10000
+  # C11b: lambda_GC is computed on synonymous rows with p < 1 (both lambdas reported); if p = 1 rows exceed this
+  # fraction of the synonymous rows the control is not evaluable.
+  syn_max_p1_fraction: 0.05
+  # C11c: a replication-sign arm is evaluable only if its p is below this; underpowered arms never count as failures.
+  replication_sign_max_p: 0.05
   # C10b: replication-sign control from established biology. In the independent replication cohort, on the
   # hypercholesterolemia proxy (plof): PCSK9 beta < 0, LDLR beta > 0. >= 1 must be evaluable; every evaluable one must hold.
   replication_sign:

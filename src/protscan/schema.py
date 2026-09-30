@@ -16,7 +16,7 @@ DOMAINS = ("cognitive", "physical", "metabolic")
 
 
 # C10c: sha256 of the committed config/prereg.yaml. Changes only with a dated ledger entry.
-PINNED_CONFIG_SHA256 = "7507f535f0c4e01fd7c32d59411feace25659a6b1aa32d7216d118fc061d2db4"
+PINNED_CONFIG_SHA256 = "7ce18c381814ba0bdfbd56ff6afa236a413bba5752517ebb901b1de74f834b83"
 
 
 @dataclass(frozen=True)
@@ -38,6 +38,8 @@ class Config:
     syn_hits_max: int
     syn_min_coverage: float
     syn_min_rows: int
+    syn_max_p1_fraction: float
+    replication_sign_max_p: float
     replication_sign: tuple
     positive_controls: tuple
     qualifying_domains: tuple
@@ -125,6 +127,8 @@ def load_config(path) -> Config:
         syn_hits_max=int(y["controls"]["syn_hits_max"]),
         syn_min_coverage=float(y["controls"]["syn_min_coverage"]),
         syn_min_rows=int(y["controls"]["syn_min_rows"]),
+        syn_max_p1_fraction=float(y["controls"]["syn_max_p1_fraction"]),
+        replication_sign_max_p=float(y["controls"]["replication_sign_max_p"]),
         replication_sign=tuple(y["controls"]["replication_sign"]),
         positive_controls=pos,
         qualifying_domains=q,

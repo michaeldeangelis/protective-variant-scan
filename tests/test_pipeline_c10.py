@@ -99,12 +99,12 @@ def test_report_shows_syn_coverage(make):
 
 
 # ---------------- C10b ----------------
-def sign_rows(pcsk9=None, ldlr=None, source=None):
+def sign_rows(pcsk9=None, ldlr=None, source=None, p=0.01):
     rows = []
     if pcsk9 is not None:
-        rows.append(row("PCSK9", "hypercholesterolemia", cohort="replication", beta=pcsk9, p=0.3, source=source))
+        rows.append(row("PCSK9", "hypercholesterolemia", cohort="replication", beta=pcsk9, p=p, source=source))
     if ldlr is not None:
-        rows.append(row("LDLR", "hypercholesterolemia", cohort="replication", beta=ldlr, p=0.3, source=source))
+        rows.append(row("LDLR", "hypercholesterolemia", cohort="replication", beta=ldlr, p=p, source=source))
     return rows
 
 
@@ -250,17 +250,17 @@ def test_requests_and_pyarrow_declared():
     assert '"requests"' in deps and '"pyarrow"' in deps
 
 
-def test_positive_control_goes_through_pipeline_tier_path():
+def test_positive_control_uses_pipeline_discovery_path_and_ignores_tradeoffs():
     good = [row("PCSK9", "ldl", beta=-0.8, p=1e-30), row("PCSK9", "coronary_disease", beta=-0.1, p=0.3),
             row("APOC3", "triglycerides", beta=-1.0, p=1e-20)]
     ok = controls.positive_controls(table(good), cfg)
     assert [c["status"] for c in ok] == ["OK", "OK", "OK"]
-    assert ok[0]["via_pipeline_tier_path"] and ok[0]["tested"][0]["pipeline_tier"] == "B"
-    assert not ok[1]["via_pipeline_tier_path"] and not ok[2]["via_pipeline_tier_path"]
-    # PCSK9/LDL with a significant adverse trade-off comes out Tier C in the pipeline: the control fails
+    assert ok[0]["via_pipeline_discovery_path"] and ok[0]["tested"][0]["pipeline_tier"] == "B"
+    assert not ok[1]["via_pipeline_discovery_path"] and not ok[2]["via_pipeline_discovery_path"]
+    # C11d: a significant adverse trade-off (PCSK9 and type 2 diabetes) makes PCSK9 Tier C but never changes control status
     adverse = good + [row("PCSK9", "type_2_diabetes", beta=0.9, p=1e-6)]
-    bad = controls.positive_controls(table(adverse), cfg)
-    assert bad[0]["status"] == "FAIL" and bad[0]["tested"][0]["pipeline_tier"] == "C"
+    c = controls.positive_controls(table(adverse), cfg)
+    assert [x["status"] for x in c] == ["OK", "OK", "OK"] and c[0]["tested"][0]["pipeline_tier"] == "C"
 
 
 def test_positive_control_not_in_pipeline_hits_fails(monkeypatch):
