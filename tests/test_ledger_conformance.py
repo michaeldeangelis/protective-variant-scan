@@ -2308,3 +2308,12 @@ def test_a2_ledger_entry_header_names_amendment_2(scenario_runs):
     _, res, d = scenario_runs["pass"]
     assert "amendment 2" in res["ledger_entry"].lower()
     assert "amendment 2" in (d / "out" / "report.md").read_text().split("## Verdict")[0].lower()
+
+
+def test_a2a_ladder_rungs_candidate_is_filtered_and_simplest_is_not(scenario_runs):
+    """The candidate rung follows the tiers (contaminated gene absent); the simplest rung is deliberately unfiltered and says so."""
+    _, contam, d = scenario_runs["contaminated_tierA"]
+    _, clean, _ = scenario_runs["pass"]
+    assert contam["rungs"]["candidate"]["n_genes_by_tier"]["A"] == clean["rungs"]["candidate"]["n_genes_by_tier"]["A"] - 1
+    assert contam["rungs"]["simplest"]["n_gene_trait_pairs"] >= clean["rungs"]["simplest"]["n_gene_trait_pairs"]
+    assert "contaminated genes included" in (d / "out" / "report.md").read_text()

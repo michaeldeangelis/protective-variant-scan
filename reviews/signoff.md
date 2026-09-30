@@ -1,40 +1,39 @@
 # Reviewer signoff: protective-variant scan v1 (ledger conformance)
 
-Reviewer: independent of the builders. Scope: experiments.md entry 2026-09-29 protective-variant-scan, Amendment 1, clarifications C1-C11.
-Reviewed code state: pipeline 49c5ee4 (C11) with adapters ec033d2; config sha256 7ce18c381814ba0bdfbd56ff6afa236a413bba5752517ebb901b1de74f834b83; reviewer tests at the commit after f361142.
-Supersedes the earlier signoff (C10 state). Details: reviews/review-1.md, review-2.md, review-3.md.
+Reviewer: independent of the builders. Scope: experiments.md entry 2026-09-29 protective-variant-scan, Amendment 1 (C1-C11), RUN 1 RESULT and Amendment 2 (A2a-A2d).
+Reviewed code state: pipeline fbc0053 (Amendment 2) on top of 49c5ee4 / ec033d2; config sha256 be69827539daac4c78b4c8f6ac7d931723abb41ab0e739c0505c357689310a9f; reviewer tests at the commit after 4d721a5.
+Supersedes the signoff for run 1. Details: reviews/review-1.md to review-4.md.
 
-## Verdict
-- Suite: green. tests/test_ledger_conformance.py 284 passed, 3 xfailed; full repository 479 passed, 3 xfailed. The 3 xfails are documented residual gaps (R2-1, R3-1, R3-2), not hidden failures.
-- Ledger conformance: the pipeline conforms to the ledger as written through C11a-d. No open item creates a false PASS by itself.
-- First real run: SIGNED OFF as the first real run, on these conditions. (1) Use config/prereg.yaml unchanged (report and JSON must show config_matches_ledger true, no NON-PREREGISTERED or SYNTHETIC label). (2) For every PASS or LEAD gene, hand-check that at least 5 of its trade-off rows are informative (finite se, beta not 0, p not 1), because R3-1 lets uninformative rows count as screened. (3) Read the synonymous control detail (both lambdas, p = 1 share, coverage) before any KILL or hit list, and read a KILL involving the sign control or the positive controls with the C11c and C11d reading rule. R3-1 is a small code change that should be made before the result is treated as final; it does not block a first run.
+## Decision on run 2
+- Suite: green. tests/test_ledger_conformance.py 368 passed, 5 xfailed. Full repository 586 passed, 5 xfailed. The 5 xfails are documented residual gaps (R2-1, R3-1, R3-2, R4-1, R4-3), not hidden failures.
+- Run 2: YES, signed off, under the ledger rules as written in Amendment 2, on the conditions below. This is the re-verification A2d asks for before run 2 starts. Nothing found can produce a false PASS by itself; the A2 filter and bound behave exactly as A2a and A2b state.
+- Honest framing that must stay attached: Amendment 2 changed the negative control after run 1 failed it, and its 0.1 percent bound (about 18 genes, six times the 3 seen) is post-hoc. Run 1 stands as KILL under the original rule. A PASS or LEAD in run 2 is "passed under Amendment 2, which was written after run 1 failed", never a clean preregistered pass.
+
+## Conditions on run 2 and on anything reported from it
+1. Use config/prereg.yaml unchanged: report and JSON must show config_matches_ledger true, the label "Amendment 2 (post-hoc after run 1)" and no NON-PREREGISTERED or SYNTHETIC label. Do not change any rule, bound or list after seeing run 2; a change needs a new dated entry and a new run.
+2. Read the contamination table before any hit list: how many genes, which traits, whether they cluster at one locus or one trait. A KILL from the A2b bound is systemic contamination; a single unreliable trait (rare binary outcome) can cause it and is visible in the table.
+3. For every PASS or LEAD gene, by hand: (a) A2c, chromosome position and GWAS Catalog lookup of the same trait within 500 kb (the pipeline does not carry coordinates, R4-4); (b) confirm the gene has a synonymous row and note its smallest synonymous p, because a gene without one cannot be assessed by A2a (R4-1) and a sub-threshold signal is not excluded; (c) confirm at least 5 of its trade-off rows are informative (finite se, beta not 0, p not 1), because uninformative rows still count as screened (R3-1).
+4. Read a KILL that involves the sign control or the positive controls with the C11 reading rule; a biology conclusion needs all controls valid.
+5. PASS or LEAD remains a candidate only: cognitive results cap at LEAD, PASS is reachable only through systolic blood pressure with the FinnGen hypertension proxy (C2), and the C5 and C7 caveats accompany it.
+6. Do not open results/run1-*.json tier lists to steer the choice of rules; the reviewer did not open them.
 
 ## Verified by running code
-- Ledger constants typed from the ledger (not from config): thresholds, panel and directions, 9 trade-offs, proxies, C1 to C11 numbers, lipid list frozen at 4073b89, and a literal copy of the config file sha256. The pin was recomputed independently with shasum, and git diff of config/prereg.yaml against the C10 version shows exactly two added keys (syn_max_p1_fraction 0.05, replication_sign_max_p 0.05).
-- Independent oracle (discovery, replication with informative rows, adverse, C1/C9 screening, tiers, controls including coverage, p = 1 share, powered sign arms, verdict) agrees with the pipeline on 8 synthetic scenarios through python -m protscan run, on 25 fuzz tables with undefined-se and beta-zero replication rows, and on targeted mutations.
-- Verdict logic exhaustive over all 256 (tier, qualifies) combinations: a LEAD is never reported as PASS; failed or not-run controls give KILL.
-- Boundaries tested: discovery p, one-sided replication 0.05, adverse alpha/9 one-sided, 5 screened outcomes, synonymous coverage 90 percent and 10,000 rows, p = 1 share 5 percent, sign-arm p 0.05, lambda 1.10, A1FREQ 0.5.
-- Mutation testing: 24 mutants (C1-C9 code), 20 mutants (C10 code), 21 mutants (C11 code); all killed (one C11 survivor was found and closed with a new test).
-- Fix-removal check: each test converted from xfail to a hard test was shown to fail when its fix is removed.
-- Adversarial probes run: config pin bypass variants, sign-control gaming, coverage-gate edges, NaN se end to end, degenerate FinnGen se, deflation masking (exact p = 1 closed, p just below 1 open), A1FREQ boundaries, mixed synthetic and real inputs, PCSK9 trade-off harm.
-- Builders' test files read for tautologies (review-2 R2-9): config-relative direction in synthetic fixtures noted; independent direction checks exist in the reviewer file.
+- Pin recomputed independently (shasum) and config diff against the previous version: syn_hits_max removed, syn_contaminated_max_fraction 0.001 added, nothing else.
+- Ledger constants typed from the ledger (not from config), including the A2 numbers, and a literal copy of the config sha256.
+- Independent oracle (discovery, contamination filter, replication with informative rows, adverse, C1/C9 screening, tiers, controls with coverage, p = 1 share, powered sign arms and the exact integer 0.1 percent bound, verdict) agrees with the pipeline on 11 synthetic scenarios through python -m protscan run, on 25 fuzz tables with random synonymous hits, and on targeted mutations.
+- A2a and A2b boundaries: strict discovery threshold, either direction, all 23 traits, cohort and mask limits, one contaminated gene per tier with a clean twin, 1/1000, 2/2000, 3/3000 pass and 2/1000, 3/2000, 4/3000 fail, denominator is genes not rows, gene counted once, contaminated control genes still pass their controls, disclosure in verdict block, label, report, JSON and CLI.
+- Verdict logic exhaustive over 256 (tier, qualifies) combinations: a LEAD is never reported as PASS.
+- Mutation testing: 24 (C1-C9), 20 (C10), 21 (C11) and 18 (A2) mutants, all killed.
+- Earlier closures (review-1 to review-3) still hold in the current state.
 
 ## Not verified
-- No real data outcome was opened. Real Genebass and FinnGen sign conventions, real synonymous lambda_GC, coverage and p = 1 share, real PCSK9 and LDLR arm power, and real drop counts are unchecked. Counts quoted in docs/data-sources.md (zero rows dropped) are the builders' statements.
-- Nothing was executed over the network (fetch scripts, download helpers, gnomAD download).
-- A clean-environment install of the declared dependencies was not run (pyproject text only).
-- Behaviour and memory at real scale (hundreds of thousands of rows) were not measured.
-- Adapters were checked against the builders' fixtures and reviewer-built rows, not live responses.
-- The AstraZeneca portal consistency check is not automated and was not assessed.
+- No real data outcome was opened, including run 1 tier lists and everything under data/. Real synonymous contamination, its loci, real lambda, coverage, p = 1 share, real sign-arm power and real drop counts are unchecked. The run 1 numbers quoted in the ledger are the lead's statements.
+- The claim in the ledger that CD3EAP, ZNF224 and HPR sit in LD with common-variant loci is unverified (the ledger marks it so) and was not assessed.
+- Nothing was executed over the network. A clean-environment install of the declared dependencies was not run. Behaviour and memory at real scale were not measured. Adapters were checked against fixtures, not live responses. The AstraZeneca portal check is not automated and was not assessed.
 
 ## Open items
-- R3-1 Low-Medium: uninformative trade-off rows count as screened (fix: apply informative() in tradeoff_tested).
-- R3-2 Low-Medium: p just below 1 evades the C11b filter (fix: gate the share of p above 0.99).
-- R2-1 Low: hit pairs may be omitted inside the 90 percent coverage.
-- R3-3 Info: discovery_hits is not informativeness-filtered (adapter-guarded); adverse screen intentionally unfiltered.
-- R3-4 / R2-7 Low: adapter drop counts are not in the result record.
-- R2-6, R2-8, R2-9, R2-10 Low: self-referential pin (mitigated by the reviewer literal), PASS-gene list printed under KILL, config-relative builder tests, gnomAD transcript order.
-
-## Conditions on any reported result
-- PASS or LEAD is a candidate only: cognitive results cap at LEAD, and PASS is reachable only through systolic blood pressure with the FinnGen hypertension proxy (C2). The C5 and C7 caveats must accompany it.
-- A KILL from a failed or not-evaluable control is a pipeline or data conclusion, not a biology conclusion (C11 reading rule).
+- R4-1 Low-Medium: hit gene without a synonymous row is unassessed and unflagged (fix: syn_assessed and min_syn_p columns).
+- R3-1 Low-Medium: uninformative trade-off rows count as screened. R3-2 Low-Medium: p just below 1 evades the p = 1 filter.
+- R4-2 Low: verdict reason does not say when A2a removed a would-be PASS or LEAD gene. R4-3 Low: header still reads "with AMENDMENT 1".
+- R4-4 Info: A2c needs coordinates the pipeline drops. R4-5 Info: post-hoc bound six times the run 1 count.
+- R2-1, R3-3, R3-4, R2-6, R2-8, R2-9, R2-10 Low or Info: see reviews 2 and 3.
