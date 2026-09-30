@@ -68,7 +68,12 @@ L_REP_SIGN = (("PCSK9", "hypercholesterolemia", -1), ("LDLR", "hypercholesterole
 L_A1FREQ_MAX = 0.5                                    # C10b adapter guard
 # Reviewer's own pin of config/prereg.yaml (second, independent copy of schema.PINNED_CONFIG_SHA256, C10c).
 # Update only together with a dated ledger entry.
-L_CONFIG_SHA256 = "7507f535f0c4e01fd7c32d59411feace25659a6b1aa32d7216d118fc061d2db4"
+# Pin history: 7507f535... (C10) replaced by the C11 config, which adds only syn_max_p1_fraction and replication_sign_max_p
+# (reviewer diff of config/prereg.yaml against the C10 version, and an independent shasum, both checked).
+L_CONFIG_SHA256 = "7ce18c381814ba0bdfbd56ff6afa236a413bba5752517ebb901b1de74f834b83"
+# C11 (lead decisions on review-2), typed from experiments.md
+L_SYN_MAX_P1_FRACTION = 0.05                          # C11b: more than 5 percent of syn rows at p = 1 makes the control not evaluable
+L_REP_SIGN_MAX_P = 0.05                               # C11c: a sign-control arm is evaluable only if its p is below 0.05
 
 
 # Tier letters (ledger):
@@ -173,6 +178,8 @@ def test_config_controls(cfg_yaml):
     assert c["syn_hits_max"] == L_SYN_HITS_MAX
     assert c["syn_min_coverage"] == L_SYN_MIN_COVERAGE                    # C10a
     assert c["syn_min_rows"] == L_SYN_MIN_ROWS
+    assert c["syn_max_p1_fraction"] == L_SYN_MAX_P1_FRACTION               # C11b
+    assert c["replication_sign_max_p"] == L_REP_SIGN_MAX_P                 # C11c
     got = tuple((x["gene"], x["trait"], x["expected_beta_sign"]) for x in c["replication_sign"])
     assert got == L_REP_SIGN, got                                          # C10b
     pos = c["positive"]
@@ -226,6 +233,7 @@ def test_config_loads_via_schema_and_derives_thresholds():
     assert c.lambda_gc_max == L_LAMBDA_GC_MAX
     assert c.syn_hits_max == 0
     assert c.syn_min_coverage == L_SYN_MIN_COVERAGE and c.syn_min_rows == L_SYN_MIN_ROWS
+    assert c.syn_max_p1_fraction == L_SYN_MAX_P1_FRACTION and c.replication_sign_max_p == L_REP_SIGN_MAX_P
     for t, (_, s) in L_PANEL.items():
         assert c.sign(t) == s
     for t in L_TRADEOFF:
@@ -673,6 +681,8 @@ def oracle(df):
             hits.append((r.gene, r.trait))
     rep = df.query("cohort == 'replication' and mask == 'plof'")
     rep = rep[[is_independent_source(s) for s in rep["source"]]]
+    # C11a: a replication row is evidence only if se is finite and above 0 and beta is nonzero
+    rep = rep[[(np.isfinite(se) and se > 0 and b != 0) for se, b in zip(rep["se"], rep["beta"])]]
     repd = dict(((r.gene, r.trait), r) for r in rep.itertuples())
     adverse_genes = set()
     tox = df.query("mask == 'plof' and cohort in ['discovery', 'replication']")
@@ -704,14 +714,17 @@ def oracle(df):
             tiers[(g, t)] = "D"
     # controls
     syn = df.query("cohort == 'discovery' and mask == 'syn'")
-    lam = float(np.median(chi2.isf(np.clip(syn["p"].to_numpy(), 1e-300, 1.0), 1)) / CHI2_MEDIAN) if len(syn) else float("inf")
+    syn_inf = syn[syn["p"] < 1]                                                                    # C11b
+    lam = (float(np.median(chi2.isf(np.clip(syn_inf["p"].to_numpy(), 1e-300, 1.0), 1)) / CHI2_MEDIAN)
+           if len(syn_inf) else float("inf"))
+    p1_fraction = (1.0 - len(syn_inf) / len(syn)) if len(syn) else 1.0
     syn_hits = [r for r in syn.itertuples() if r.trait in L_PANEL and oracle_discovery(r.beta, r.p, L_PANEL[r.trait][1])]
 
     def rowof(g, t):
         x = d[(d["gene"] == g) & (d["trait"] == t)]
         return x.iloc[0] if len(x) else None
 
-    ok = lam < L_LAMBDA_GC_MAX and len(syn_hits) == 0
+    ok = lam < L_LAMBDA_GC_MAX and len(syn_hits) == 0 and p1_fraction <= L_SYN_MAX_P1_FRACTION + 1e-12
     plof_pairs = set(zip(d["gene"], d["trait"]))
     syn_pairs = set(zip(syn["gene"], syn["trait"]))
     coverage = (len(plof_pairs.intersection(syn_pairs)) / len(plof_pairs)) if plof_pairs else 0.0
@@ -719,12 +732,12 @@ def oracle(df):
     signs = []
     for g, tr, want in L_REP_SIGN:                                                               # C10b
         hit_rows_ = rep[(rep["gene"] == g) & (rep["trait"] == tr)]
-        if len(hit_rows_):
+        if len(hit_rows_) and hit_rows_.iloc[0].p < L_REP_SIGN_MAX_P:                            # C11c: powered arms only
             signs.append(hit_rows_.iloc[0].beta * want > 0)
     ok = ok and len(signs) >= 1 and all(signs)
     x = rowof("PCSK9", "ldl")
     ok = ok and x is not None and oracle_discovery(x.beta, x.p, -1)
-    ok = ok and ("PCSK9", "ldl") in tiers and tiers[("PCSK9", "ldl")] != "C"                   # C10g via tier path
+    ok = ok and ("PCSK9", "ldl") in tiers                                                       # C11d: discovery path, any tier
     x = rowof("PCSK9", "coronary_disease")
     ok = ok and x is not None and x.beta < 0
     tg = [rowof(g, "triglycerides") for g in ("ANGPTL4", "APOC3")]
@@ -1108,7 +1121,15 @@ def _fuzz_table(seed, n_genes=60):
                 s2 = 1 if rng.random() < 0.7 else -1
                 p2 = float(rng.choice([0.001, 0.03, 0.0999, 0.1, 0.11, 0.4, 0.9]))
                 src = str(rng.choice(indep + ukb))
-                rows.append(R(g, px, "plof", "replication", s2 * benefit_sign(px) * 0.2, p2, source=src))
+                rrow = R(g, px, "plof", "replication", s2 * benefit_sign(px) * 0.2, p2, source=src)
+                u = rng.random()
+                if u < 0.12:
+                    rrow[5] = float("nan")                          # C11a: undefined se
+                elif u < 0.20:
+                    rrow[5] = 0.0
+                elif u < 0.28:
+                    rrow[4] = 0.0                                   # C11a: beta exactly 0
+                rows.append(rrow)
         for out in L_TRADEOFF:
             for cohort in ("discovery", "replication"):
                 if rng.random() < 0.6:
@@ -1598,8 +1619,6 @@ def test_c10d_pipeline_serializes_results_with_nan_se_rows(base_frames, tmp_path
     json.loads((tmp_path / "out" / "protective-scan.json").read_text())
 
 
-@pytest.mark.xfail(strict=False, reason="R2-2: FinnGen rows with SE <= 0 or missing are kept with the LOG10P-derived p, "
-                                          "although a degenerate fit is not evidence")
 def test_c10d_finngen_row_with_degenerate_se_but_significant_p_is_not_used():
     from protscan.adapters import finngen
     raw = _finngen_raw([["I9_HYPTENS", "DEGEN", 0.001, 1000, "ADD", -2.0, 0.0, 6.0],
@@ -1609,7 +1628,6 @@ def test_c10d_finngen_row_with_degenerate_se_but_significant_p_is_not_used():
     assert list(out["gene"]) == ["FINE"]
 
 
-@pytest.mark.xfail(strict=False, reason="R2-2: a replication row with se NaN and a tiny p reaches Tier A")
 def test_c10d_replication_row_with_undefined_se_and_tiny_p_cannot_give_tier_A(cfg):
     rows = hit_rows("GA", "systolic_bp") + null_tradeoffs("GA", cohorts=("discovery",))
     r = R("GA", "hypertension", "plof", "replication", good("hypertension"), 1e-9)
@@ -1665,17 +1683,38 @@ def test_c10g_untrusted_replication_rows_still_count_for_adverse_detection(cfg):
     assert tier_map(rows, cfg)[("GA", "systolic_bp")] == "C"     # conservative: an adverse signal is never ignored by source
 
 
-def test_c10g_positive_control_is_evaluated_through_the_pipeline_tier_path(null_table, cfg):
+def test_c11d_positive_control_is_judged_on_the_discovery_effect_only(null_table, cfg):
+    """C11d supersedes the C10g tier-C exclusion: the trade-off screen never changes control status."""
     c = controls.run_controls(validate(null_table), cfg)
     ldl = [p for p in c["positive"] if p["id"] == "pcsk9_ldl_lower"][0]
-    assert ldl["via_pipeline_tier_path"] is True
+    assert ldl["via_pipeline_discovery_path"] is True and "via_pipeline_tier_path" not in ldl
     assert ldl["tested"][0]["pipeline_tier"] in ("A", "B", "D")
-    # a tier-C outcome (adverse trade-off on the control gene) makes the positive control fail
-    df = pd.concat([null_table, pd.DataFrame([R("PCSK9", "type_2_diabetes", "plof", "discovery", +0.9, 1e-5)],
-                                             columns=COLUMNS)], ignore_index=True)
-    c2 = controls.run_controls(validate(df), cfg)
-    ldl2 = [p for p in c2["positive"] if p["id"] == "pcsk9_ldl_lower"][0]
-    assert ldl2["tested"][0]["pipeline_tier"] == "C" and ldl2["status"] == "FAIL" and c2["valid"] is False
+    # a harmful, significant type 2 diabetes signal on PCSK9 (known biology) makes PCSK9/LDL Tier C but leaves the control OK
+    for extra in (R("PCSK9", "type_2_diabetes", "plof", "discovery", +0.9, 1e-5),
+                  R("PCSK9", "type_2_diabetes", "plof", "replication", +0.9, 1e-5)):
+        df = pd.concat([null_table, pd.DataFrame([extra], columns=COLUMNS)], ignore_index=True)
+        c2 = controls.run_controls(validate(df), cfg)
+        ldl2 = [p for p in c2["positive"] if p["id"] == "pcsk9_ldl_lower"][0]
+        assert ldl2["tested"][0]["pipeline_tier"] == "C"
+        assert ldl2["status"] == "OK" and c2["valid"] is True and c2["failed"] == [], extra[3]
+
+
+def test_c11d_positive_control_still_fails_on_the_discovery_effect(null_table, cfg):
+    weak = set_row(null_table, "PCSK9", "ldl", "plof", "discovery", p=1e-5)             # not at the discovery threshold
+    wrong = set_row(null_table, "PCSK9", "ldl", "plof", "discovery", beta=bad("ldl"))   # wrong direction
+    for df in (weak, wrong):
+        c = controls.run_controls(validate(df), cfg)
+        assert c["valid"] is False and "pcsk9_ldl_lower" in c["failed"]
+
+
+def test_c11d_end_to_end_pcsk9_type_2_diabetes_harm_does_not_kill(base_frames, tmp_path):
+    def edit(df):
+        setrow(df, "PCSK9", "type_2_diabetes", "plof", "discovery", z=6.0)
+    res, df = mutated_run(base_frames["pass"], edit, tmp_path)
+    assert result_tiers(res)[("PCSK9", "ldl")] == "C"
+    assert res["controls"]["valid"] is True and res["verdict"]["verdict"] == "PASS"
+    ok, tiers, o_verdict = oracle(df)
+    assert ok and o_verdict == "PASS" and tiers[("PCSK9", "ldl")] == "C"
 
 
 def test_c10g_synthetic_and_real_sources_cannot_be_mixed(tmp_path):
@@ -1712,8 +1751,278 @@ def test_c10d_deflation_masking_setup_is_a_real_inflation(null_table):
     assert lam > 3.0
 
 
-@pytest.mark.xfail(strict=False, reason="R2-4: rows with p = 1 kept for lambda_GC (C10d) can mask inflation of the informative rows")
 def test_c10d_lambda_control_is_not_masked_by_uninformative_rows(null_table, cfg):
     df, _ = _deflation_masked_table(null_table)
     n = neg_of(df, cfg)
     assert n["status"] != "OK"
+
+
+# ======================================================================================
+# (f) C11a-d: closure of review-2 findings R2-2 (a), R2-4 (b), R2-3 (c), R2-5 (d)
+# ======================================================================================
+def rep_row(gene, trait, beta, p, se=0.1, source="finngen_r13"):
+    r = R(gene, trait, "plof", "replication", beta, p, source=source)
+    r[5] = se
+    return r
+
+
+# ---------------- C11a: only informative replication rows count ----------------
+NAN = float("nan")
+
+
+@pytest.mark.parametrize("label,beta,se", [("se_nan", -0.3, NAN), ("se_zero", -0.3, 0.0), ("se_negative_like_inf", -0.3, float("inf")),
+                                           ("beta_zero", 0.0, 0.1)])
+def test_c11a_uninformative_replication_row_cannot_replicate(label, beta, se, cfg):
+    rows = hit_rows("GA", "systolic_bp") + null_tradeoffs("GA", cohorts=("discovery",))
+    rows.append(rep_row("GA", "hypertension", beta, 1e-9, se=se))
+    if se == 0.0:
+        rows[-1][5] = 0.0
+    hits = tiering.build_hits(T(rows) if se != float("inf") else validate(pd.DataFrame(rows, columns=COLUMNS)), cfg)
+    assert list(hits["tier"]) == ["B"], label                                 # never A; no informative row: trait_missing
+    assert list(hits["rep_status"]) == ["trait_missing"], label
+
+
+def test_c11a_smallest_finite_positive_se_and_nonzero_beta_still_count(cfg):
+    rows = hit_rows("GA", "systolic_bp") + null_tradeoffs("GA", cohorts=("discovery",))
+    rows.append(rep_row("GA", "hypertension", -1e-9, 1e-9, se=1e-12))
+    assert tier_map(rows, cfg)[("GA", "systolic_bp")] == "A"
+
+
+def test_c11a_an_uninformative_row_does_not_hide_the_traits_other_genes(cfg):
+    """A degenerate row for gene GB must not turn gene GA (no replication row at all) into trait_missing or vice versa."""
+    rows = hit_rows("GA", "systolic_bp") + null_tradeoffs("GA", cohorts=("discovery",))
+    rows.append(rep_row("GB", "hypertension", -0.3, 1e-9, se=NAN))
+    rows.append(rep_row("GC", "hypertension", -0.3, 0.01, se=0.1))
+    hits = tiering.build_hits(T(rows), cfg)
+    assert list(hits["rep_status"]) == ["gene_untested"]                     # GC supplies the trait; GB row is ignored
+
+
+def test_c11a_uninformative_rows_still_serve_lambda_and_coverage(null_table, cfg):
+    df = null_table.copy()
+    sel = df.index[(df["mask"] == "syn") & df["gene"].str.startswith("NULLG")][:300]
+    df.loc[sel, ["beta", "p"]] = [0.0, 1.0]
+    df.loc[sel, "se"] = NAN
+    n = neg_of(df, cfg)
+    assert n["status"] == "OK" and n["n_p1_rows"] == 300 and n["coverage"] == neg_of(null_table, cfg)["coverage"]
+
+
+def test_c11a_finngen_adapter_drops_undefined_se_with_p_below_1_and_counts_it():
+    from protscan.adapters import finngen
+    raw = _finngen_raw([["I9_HYPTENS", "DEGEN0", 0.001, 1000, "ADD", -2.0, 0.0, 6.0],
+                        ["I9_HYPTENS", "DEGENNAN", 0.001, 1000, "ADD", -2.0, NAN, 6.0],
+                        ["I9_HYPTENS", "NULLROW", 0.001, 1000, "ADD", 0.0, 0.0, 0.0],       # beta 0, p = 1: kept, se undefined
+                        ["I9_HYPTENS", "FINE", 0.001, 1000, "ADD", -0.5, 0.1, 6.0],
+                        ["I9_HYPTENS", "FLIPPED", 0.9, 1000, "ADD", 0.5, 0.1, 6.0],
+                        ["I9_HYPTENS", "NOBETA", 0.001, 1000, "ADD", NAN, 0.1, 6.0]])
+    out = finngen.normalize_endpoint(raw, "I9_HYPTENS").set_index("gene")
+    assert sorted(out.index) == ["FINE", "NULLROW"]
+    assert np.isnan(out.loc["NULLROW", "se"]) and out.loc["NULLROW", "p"] == 1.0
+    summ = finngen.conversion_summary(raw).set_index("endpoint").loc["I9_HYPTENS"]
+    assert summ["rows_read"] == 6 and summ["dropped_a1freq"] == 1 and summ["dropped_missing_beta_or_p"] == 1
+    assert summ["dropped_undefined_se_p_lt_1"] == 2 and summ["kept_se_undefined"] == 1 and summ["rows_out"] == 2
+
+
+def test_c11a_genebass_adapter_drops_beta_zero_with_p_below_1_and_keeps_p_1():
+    from protscan.adapters import genebass
+    recs = [dict(gene_symbol="GA", gene_id="E1", BETA_Burden=-0.5, Pvalue_Burden=1e-6),
+            dict(gene_symbol="GB", gene_id="E2", BETA_Burden=0.0, Pvalue_Burden=0.5),      # defect: beta 0 with p < 1
+            dict(gene_symbol="GC", gene_id="E3", BETA_Burden=0.0, Pvalue_Burden=1.0),      # uninformative: kept
+            dict(gene_symbol="GD", gene_id="E4", BETA_Burden=0.2, Pvalue_Burden=1.0)]      # p = 1 with beta: kept
+    qc = [dict(gene_id=e, gene_symbol=g, annotation="pLoF", CAF=0.001, keep_gene_burden=True, keep_gene_coverage=True,
+               keep_gene_n_var=True) for e, g in (("E1", "GA"), ("E2", "GB"), ("E3", "GC"), ("E4", "GD"))]
+    st = {}
+    out = genebass.normalize_analysis(recs, qc, "syn", 1000, stats=st).set_index("gene")
+    assert sorted(out.index) == ["GA", "GC", "GD"]
+    assert st["rows_in"] == 4 and st["dropped_undefined_se_p_lt_1"] == 1 and st["kept_se_undefined"] == 2
+    assert out.loc["GC", "p"] == 1.0 and np.isnan(out.loc["GC", "se"])
+
+
+def test_c11a_ivw_combine_keeps_only_undefined_se_genes_with_p_1():
+    from protscan.adapters import common
+    a = pd.DataFrame(dict(gene=["G1", "G2", "G3"], mask="plof", beta=[0.0, 0.0, 0.3], se=[NAN, NAN, 0.1], p=[1.0, 0.4, 0.003],
+                          n_carriers=10, n_total=100))
+    b = pd.DataFrame(dict(gene=["G1", "G2", "G3"], mask="plof", beta=[0.0, 0.0, 0.5], se=[NAN, NAN, 0.2], p=[1.0, 0.4, 0.01],
+                          n_carriers=10, n_total=100))
+    out = common.ivw_combine([a, b], "max").set_index("gene")
+    assert sorted(out.index) == ["G1", "G3"] and np.isnan(out.loc["G1", "se"]) and out.loc["G1", "p"] == 1.0
+
+
+# ---------------- C11b: lambda_GC on p < 1 rows, p = 1 fraction gate ----------------
+def _with_p1_rows(null_table, k):
+    """Set the first k null synonymous rows to p = 1 (beta 0, se undefined)."""
+    df = null_table.copy()
+    sel = df.index[(df["mask"] == "syn") & df["gene"].str.startswith("NULLG")][:k]
+    df.loc[sel, "beta"] = 0.0
+    df.loc[sel, "p"] = 1.0
+    df.loc[sel, "se"] = NAN
+    return df
+
+
+def test_c11b_p1_fraction_boundary_is_five_percent_of_synonymous_rows(null_table, cfg):
+    n_syn = int((null_table["mask"] == "syn").sum() - 0)
+    k_ok = int(np.floor(L_SYN_MAX_P1_FRACTION * n_syn + 1e-9))               # exactly at the limit or just below
+    ok = neg_of(_with_p1_rows(null_table, k_ok), cfg)
+    assert ok["status"] == "OK" and ok["n_p1_rows"] == k_ok and ok["p1_fraction"] <= L_SYN_MAX_P1_FRACTION
+    over = neg_of(_with_p1_rows(null_table, k_ok + 1), cfg)
+    assert over["status"] == "NOT RUN" and over["p1_fraction"] > L_SYN_MAX_P1_FRACTION and "p = 1" in over["reason"]
+
+
+def test_c11b_exactly_five_percent_is_evaluable(cfg):
+    """A table whose p = 1 share is exactly 5.000 percent (500 of 10,000 rows) is evaluable; 501 is not."""
+    def table_with(n_p1):
+        rng = np.random.default_rng(11)
+        p = rng.uniform(0.0, 0.999, size=10_000)
+        p[:n_p1] = 1.0
+        rows = []
+        for i in range(10_000):
+            rows.append(R("S%d" % i, "fev1", "plof", "discovery", 0.0, 0.5))
+            rows.append(R("S%d" % i, "fev1", "syn", "discovery", 0.0, float(p[i])))
+        return T(rows)
+    assert controls.negative_control(table_with(500), cfg)["p1_fraction"] == 0.05
+    assert controls.negative_control(table_with(500), cfg)["status"] != "NOT RUN"
+    assert controls.negative_control(table_with(501), cfg)["status"] == "NOT RUN"
+
+
+def test_c11b_lambda_is_computed_on_rows_with_p_below_1_and_both_are_reported(null_table, cfg):
+    df = _with_p1_rows(null_table, 400)                                       # 3.5 percent p = 1 rows
+    n = neg_of(df, cfg)
+    inf_p = df.loc[(df["mask"] == "syn") & (df["p"] < 1), "p"].to_numpy()
+    want = float(np.median(chi2.isf(np.clip(inf_p, 1e-300, 1.0), 1)) / CHI2_MEDIAN)
+    all_p = df.loc[df["mask"] == "syn", "p"].to_numpy()
+    want_all = float(np.median(chi2.isf(np.clip(all_p, 1e-300, 1.0), 1)) / CHI2_MEDIAN)
+    assert n["lambda_gc"] == pytest.approx(want, rel=1e-12) and n["lambda_gc_all_rows"] == pytest.approx(want_all, rel=1e-12)
+    assert n["lambda_gc_all_rows"] < n["lambda_gc"]                            # the p = 1 rows deflate the all-rows value only
+
+
+def test_c11b_inflation_hidden_by_a_small_p1_share_is_still_caught(null_table, cfg):
+    """4 percent p = 1 rows (evaluable) with inflated informative rows: the gate uses the p < 1 lambda and fails."""
+    df = null_table.copy()
+    syn_idx = df.index[(df["mask"] == "syn") & df["gene"].str.startswith("NULLG")]
+    z = np.clip(df.loc[syn_idx, "beta"] / df.loc[syn_idx, "se"] * 1.5, -4.0, 4.0)
+    df.loc[syn_idx, "p"] = 2 * norm.sf(np.abs(z))
+    df = _with_p1_rows(df, int(0.04 * len(syn_idx)))
+    n = neg_of(df, cfg)
+    assert n["status"] == "FAIL" and n["lambda_ok"] is False and n["lambda_gc"] > L_LAMBDA_GC_MAX
+
+
+def test_c11b_heavy_p1_share_end_to_end_is_kill_not_evaluable(base_frames, tmp_path):
+    def edit(df):
+        sel = df.index[(df["mask"] == "syn") & df["gene"].str.startswith("SYNG")]
+        k = int(0.06 * (df["mask"] == "syn").sum())
+        df.loc[sel[:k], ["beta", "p"]] = [0.0, 1.0]
+        df.loc[sel[:k], "se"] = NAN
+    res, df = mutated_run(base_frames["pass"], edit, tmp_path)
+    assert res["controls"]["negative_synonymous"]["status"] == "NOT RUN"
+    assert res["verdict"]["verdict"] == "KILL" and res["verdict"]["reason"].startswith("controls_not_evaluable")
+    ok, _, o_verdict = oracle(df)
+    assert not ok and o_verdict == "KILL"
+    assert res["thresholds"]["syn_max_p1_fraction"] == L_SYN_MAX_P1_FRACTION
+
+
+# ---------------- C11c: sign-control arms are evaluable only when powered ----------------
+def _sign_table(null_table, pcsk9=(-0.8, 1e-6), ldlr=(0.9, 1e-8)):
+    df = set_row(null_table, "PCSK9", "hypercholesterolemia", "plof", "replication", beta=pcsk9[0], p=pcsk9[1])
+    return set_row(df, "LDLR", "hypercholesterolemia", "plof", "replication", beta=ldlr[0], p=ldlr[1])
+
+
+@pytest.mark.parametrize("p,evaluable", [(0.0499, True), (0.05, False), (0.0501, False), (0.4, False)])
+def test_c11c_arm_is_evaluable_only_below_p_005(p, evaluable, null_table, cfg):
+    assert L_REP_SIGN_MAX_P == 0.05
+    df = _sign_table(null_table, pcsk9=(+0.5, p), ldlr=(0.9, 1e-8))            # PCSK9 arm has the WRONG sign
+    c = controls.run_controls(validate(df), cfg)
+    arm = [k for k in c["replication_sign"]["checks"] if k["gene"] == "PCSK9"][0]
+    if evaluable:
+        assert arm["status"] == "FAIL" and c["replication_sign"]["reason"] == "sign_control_failed"
+        assert "replication_sign" in c["failed"] and c["valid"] is False
+    else:
+        assert arm["status"] == "NOT RUN" and "underpowered" in arm["why"]
+        assert c["replication_sign"]["status"] == "OK" and c["valid"] is True   # underpowered arms never count as failures
+
+
+def test_c11c_a_powered_wrong_sign_arm_fails_even_when_the_other_arm_is_right(null_table, cfg):
+    df = _sign_table(null_table, pcsk9=(-0.8, 1e-6), ldlr=(-0.9, 1e-8))
+    c = controls.run_controls(validate(df), cfg)
+    assert c["replication_sign"]["status"] == "FAIL" and c["replication_sign"]["reason"] == "sign_control_failed"
+
+
+def test_c11c_no_evaluable_arm_is_not_evaluable_and_reason_is_recorded(null_table, cfg):
+    from protscan.run import decide
+    df = _sign_table(null_table, pcsk9=(-0.8, 0.3), ldlr=(0.9, 0.2))            # right signs but both underpowered
+    c = controls.run_controls(validate(df), cfg)
+    assert c["replication_sign"]["status"] == "NOT RUN" and c["replication_sign"]["reason"] == "sign_control_not_evaluable"
+    assert "replication_sign" in c["not_run"] and c["valid"] is False
+    v = decide(c, tiering.build_hits(validate(df), cfg))
+    assert v["verdict"] == "KILL" and "sign_control_not_evaluable" in v["reason"] and v["reason"].startswith("controls_not_evaluable")
+
+
+def test_c11c_failure_reason_reaches_the_verdict_text(null_table, cfg):
+    from protscan.run import decide
+    df = _sign_table(null_table, pcsk9=(+0.8, 1e-6), ldlr=(0.9, 1e-8))
+    v = decide(controls.run_controls(validate(df), cfg), tiering.build_hits(validate(df), cfg))
+    assert v["verdict"] == "KILL" and v["reason"].startswith("control_failed") and "sign_control_failed" in v["reason"]
+
+
+@pytest.mark.parametrize("beta,se", [(0.9, NAN), (0.9, 0.0), (0.0, 0.1)])
+def test_c11c_uninformative_rows_cannot_serve_as_an_arm(beta, se, null_table, cfg):
+    df = _sign_table(null_table, pcsk9=(-0.8, 1e-6), ldlr=(0.9, 1e-8))
+    i = df.index[(df["gene"] == "LDLR") & (df["cohort"] == "replication")][0]
+    df.loc[i, ["beta", "se"]] = [beta, se]
+    c = controls.run_controls(validate(df), cfg)
+    arm = [k for k in c["replication_sign"]["checks"] if k["gene"] == "LDLR"][0]
+    assert arm["status"] == "NOT RUN" and "no informative row" in arm["why"]
+    assert c["valid"] is True                                                    # the PCSK9 arm still carries the control
+
+
+def test_c11c_end_to_end_flipped_replication_is_still_control_failed(synth, tmp_path):
+    tables = synth.make_synthetic("broken_rep_sign", n_genes=N_GENES)
+    d = tmp_path / "data"
+    write_tables(tables, d)
+    from protscan.run import run_pipeline
+    res = run_pipeline(CONFIG_PATH, d, tmp_path / "o" / "r.json")
+    assert res["controls"]["replication_sign"]["reason"] == "sign_control_failed"
+    assert res["verdict"]["verdict"] == "KILL" and "sign_control_failed" in res["verdict"]["reason"]
+    assert "Reading rule" in (tmp_path / "o" / "report.md").read_text()
+    assert res["thresholds"]["replication_sign_max_p"] == L_REP_SIGN_MAX_P
+
+
+# ---------------- review-3 residual gaps (non-strict xfail) and documented conservative behaviour ----------------
+@pytest.mark.xfail(strict=False, reason="R3-1: uninformative rows (beta 0, p 1, se undefined) count as trade-off outcomes screened")
+def test_uninformative_tradeoff_rows_do_not_count_as_screened(cfg):
+    rows = hit_rows("GA", "systolic_bp")
+    rows.append(rep_row("GA", "hypertension", -0.3, 0.01))
+    for t in L_TRADEOFF[:5]:
+        r = R("GA", t, "plof", "discovery", 0.0, 1.0)
+        r[5] = NAN
+        rows.append(r)
+    assert tier_map(rows, cfg)[("GA", "systolic_bp")] != "A"
+
+
+def _near_one_masked_table(null_table, p_near=0.99999, frac=0.45, inflate=1.5):
+    df = null_table.copy()
+    syn_idx = df.index[(df["mask"] == "syn") & df["gene"].str.startswith("NULLG")]
+    z = np.clip(df.loc[syn_idx, "beta"] / df.loc[syn_idx, "se"] * inflate, -4.0, 4.0)
+    df.loc[syn_idx, "p"] = 2 * norm.sf(np.abs(z))
+    df.loc[syn_idx[: int(len(syn_idx) * frac)], "p"] = p_near
+    return df
+
+
+@pytest.mark.xfail(strict=False, reason="R3-2: the C11b filter is exact p = 1; uninformative rows stored as p just below 1 still deflate lambda_GC")
+def test_lambda_control_is_not_masked_by_p_just_below_one(null_table, cfg):
+    n = neg_of(_near_one_masked_table(null_table), cfg)
+    assert n["status"] != "OK"
+
+
+def test_c11b_exact_p_one_masking_is_closed_but_the_near_one_variant_shows_the_scope(null_table, cfg):
+    """Scope check that pairs with the xfail above: with exact p = 1 the same construction is not evaluable."""
+    df = _near_one_masked_table(null_table, p_near=1.0)
+    assert neg_of(df, cfg)["status"] == "NOT RUN"
+
+
+def test_c11a_adverse_screen_is_deliberately_not_filtered_by_informativeness(cfg):
+    """Conservative: a harmful-direction row with undefined se still flags the gene (never hides harm). Documented, review-3 R3-3."""
+    rows = sbp_replicated_gene("GA")
+    rows = drop_rows(rows, "GA", "coronary_disease", "discovery")
+    r = R("GA", "coronary_disease", "plof", "discovery", +0.9, 1e-6)
+    r[5] = NAN
+    rows.append(r)
+    assert tier_map(rows, cfg)[("GA", "systolic_bp")] == "C"
