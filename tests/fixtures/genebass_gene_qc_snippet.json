@@ -1,11 +1,92 @@
 [
-  {"gene_id": "ENSG00000000001", "gene_symbol": "GENEA", "annotation": "pLoF", "CAF": 0.0001, "keep_gene_burden": true, "keep_gene_coverage": true, "keep_gene_n_var": true},
-  {"gene_id": "ENSG00000000002", "gene_symbol": "GENEB", "annotation": "pLoF", "CAF": 0.00005, "keep_gene_burden": false, "keep_gene_coverage": true, "keep_gene_n_var": true},
-  {"gene_id": "ENSG00000000003", "gene_symbol": "GENEC", "annotation": "pLoF", "CAF": 0.0002, "keep_gene_burden": true, "keep_gene_coverage": true, "keep_gene_n_var": true},
-  {"gene_id": "ENSG00000000004", "gene_symbol": "DUPSYM", "annotation": "pLoF", "CAF": 0.0003, "keep_gene_burden": true, "keep_gene_coverage": true, "keep_gene_n_var": true},
-  {"gene_id": "ENSG00000000005", "gene_symbol": "DUPSYM", "annotation": "pLoF", "CAF": 0.0003, "keep_gene_burden": true, "keep_gene_coverage": true, "keep_gene_n_var": true},
-  {"gene_id": "ENSG00000000006", "gene_symbol": "GENED", "annotation": "pLoF", "CAF": 0.0004, "keep_gene_burden": true, "keep_gene_coverage": true, "keep_gene_n_var": true},
-  {"gene_id": "ENSG00000000007", "gene_symbol": "GENEE", "annotation": "pLoF", "CAF": 0.0005, "keep_gene_burden": true, "keep_gene_coverage": false, "keep_gene_n_var": true},
-  {"gene_id": "ENSG00000000008", "gene_symbol": "GENEF", "annotation": "pLoF", "CAF": 0.001, "keep_gene_burden": true, "keep_gene_coverage": true, "keep_gene_n_var": true},
-  {"gene_id": "ENSG00000000009", "gene_symbol": "GENEG", "annotation": "pLoF", "CAF": 0.0006, "keep_gene_burden": true, "keep_gene_coverage": true, "keep_gene_n_var": null}
+ {
+  "gene_id": "ENSG00000000001",
+  "gene_symbol": "GENEA",
+  "annotation": "pLoF",
+  "CAF": 0.0001,
+  "keep_gene_burden": true,
+  "keep_gene_coverage": true,
+  "keep_gene_n_var": true
+ },
+ {
+  "gene_id": "ENSG00000000002",
+  "gene_symbol": "GENEB",
+  "annotation": "pLoF",
+  "CAF": 5e-05,
+  "keep_gene_burden": false,
+  "keep_gene_coverage": true,
+  "keep_gene_n_var": true
+ },
+ {
+  "gene_id": "ENSG00000000003",
+  "gene_symbol": "GENEC",
+  "annotation": "pLoF",
+  "CAF": 0.0002,
+  "keep_gene_burden": true,
+  "keep_gene_coverage": true,
+  "keep_gene_n_var": true
+ },
+ {
+  "gene_id": "ENSG00000000004",
+  "gene_symbol": "DUPSYM",
+  "annotation": "pLoF",
+  "CAF": 0.0003,
+  "keep_gene_burden": true,
+  "keep_gene_coverage": true,
+  "keep_gene_n_var": true
+ },
+ {
+  "gene_id": "ENSG00000000005",
+  "gene_symbol": "DUPSYM",
+  "annotation": "pLoF",
+  "CAF": 0.0003,
+  "keep_gene_burden": true,
+  "keep_gene_coverage": true,
+  "keep_gene_n_var": true
+ },
+ {
+  "gene_id": "ENSG00000000006",
+  "gene_symbol": "GENED",
+  "annotation": "pLoF",
+  "CAF": 0.0004,
+  "keep_gene_burden": true,
+  "keep_gene_coverage": true,
+  "keep_gene_n_var": true
+ },
+ {
+  "gene_id": "ENSG00000000007",
+  "gene_symbol": "GENEE",
+  "annotation": "pLoF",
+  "CAF": 0.0005,
+  "keep_gene_burden": true,
+  "keep_gene_coverage": false,
+  "keep_gene_n_var": true
+ },
+ {
+  "gene_id": "ENSG00000000008",
+  "gene_symbol": "GENEF",
+  "annotation": "pLoF",
+  "CAF": 0.001,
+  "keep_gene_burden": true,
+  "keep_gene_coverage": true,
+  "keep_gene_n_var": true
+ },
+ {
+  "gene_id": "ENSG00000000009",
+  "gene_symbol": "GENEG",
+  "annotation": "pLoF",
+  "CAF": 0.0006,
+  "keep_gene_burden": true,
+  "keep_gene_coverage": true,
+  "keep_gene_n_var": null
+ },
+ {
+  "gene_id": "ENSG00000000010",
+  "gene_symbol": "GENEH",
+  "annotation": "pLoF",
+  "CAF": 0.0002,
+  "keep_gene_burden": true,
+  "keep_gene_coverage": true,
+  "keep_gene_n_var": true
+ }
 ]

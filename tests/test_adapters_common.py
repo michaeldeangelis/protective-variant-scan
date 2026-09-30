@@ -109,3 +109,17 @@ def test_ivw_combine_keeps_genes_whose_se_is_undefined():
     assert out.loc["M", "beta"] == pytest.approx(0.5) and out.loc["M", "se"] == pytest.approx(0.25)
     assert out.loc["U", "beta"] == 0.0 and np.isnan(out.loc["U", "se"]) and out.loc["U", "p"] == 1.0
     assert out.loc["U", "n_carriers"] == 11
+
+
+def test_drop_undefined_se_p_lt_1_keeps_p1_rows():
+    df = pd.DataFrame({"se": [0.1, np.nan, np.nan, np.nan], "p": [0.5, 1.0, 0.2, 0.9999]})
+    kept, n = common.drop_undefined_se_p_lt_1(df)
+    assert n == 2 and kept["p"].tolist() == [0.5, 1.0]
+
+
+def test_ivw_combine_drops_all_undefined_se_genes_with_p_below_1():
+    a = _frame([("D", "plof", 0.3, np.nan, 5, 100)])
+    a["p"] = [0.01]
+    b = _frame([("D", "plof", 0.3, np.nan, 6, 100)])
+    b["p"] = [0.02]
+    assert common.ivw_combine([a, b], "sum").empty

@@ -57,7 +57,7 @@ def main() -> None:
         fetch(s, f"{genebass.API}/gene-qc/burden-set/{quote(bset, safe='')}", dest, data, manifest, a.force)
         qc[bset] = json.loads(dest.read_text())
 
-    frames = []
+    frames, summary = [], []
     for trait, ids in genebass.TRAITS.items():
         per = []
         for aid in ids:
@@ -69,7 +69,9 @@ def main() -> None:
                 recs = json.loads(dest.read_text())
                 if not isinstance(recs, list) or not recs or "BETA_Burden" not in recs[0]:
                     raise SystemExit(f"unexpected response for {aid} / {bset}")
-                parts.append(genebass.normalize_analysis(recs, qc[bset], mask, genebass.analysis_n_total(meta[aid])))
+                st = {}
+                parts.append(genebass.normalize_analysis(recs, qc[bset], mask, genebass.analysis_n_total(meta[aid]), stats=st))
+                summary.append({"trait": trait, "analysis_id": aid, "mask": mask, **st})
             per.append(pd.concat(parts, ignore_index=True))
         df = genebass.build_trait(trait, per)
         print(f"{trait}: {ids} -> {len(df)} rows", flush=True)
@@ -78,6 +80,10 @@ def main() -> None:
     out = pd.concat(frames, ignore_index=True)
     out.to_csv(data / "burden_genebass.csv.gz", index=False)
     print(f"wrote {data / 'burden_genebass.csv.gz'}: {len(out)} rows")
+    sm = pd.DataFrame(summary)
+    sm.to_csv(data / "genebass_conversion_summary.csv", index=False)
+    print(f"C11a guard: {int(sm['dropped_undefined_se_p_lt_1'].sum())} of {int(sm['rows_in'].sum())} rows dropped "
+          f"(undefined se, p < 1); {int(sm['kept_se_undefined'].sum())} kept with undefined se (p = 1)")
 
 
 if __name__ == "__main__":

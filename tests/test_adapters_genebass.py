@@ -37,7 +37,10 @@ def test_qc_pass_uses_coverage_and_nvar_only(qc):
 
 
 def test_normalize_analysis_drops_and_derives(records, qc):
-    out = genebass.normalize_analysis(records, qc, "plof", 100000).set_index("gene")
+    stats = {}
+    out = genebass.normalize_analysis(records, qc, "plof", 100000, stats=stats).set_index("gene")
+    # GENEH (beta exactly 0 but p 0.3) is a data defect: undefined se with p < 1 is dropped (C11a) and counted
+    assert stats == {"rows_in": 5, "dropped_undefined_se_p_lt_1": 1, "kept_se_undefined": 1}
     # dropped: null result (GENEC), ambiguous symbol (DUPSYM), coverage fail (GENEE), null n_var (GENEG)
     # kept with undefined se: GENED (beta 0, p 1), so lambda_GC and hit counts still see it
     assert sorted(out.index) == ["GENEA", "GENEB", "GENED", "GENEF"]

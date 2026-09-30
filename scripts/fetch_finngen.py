@@ -58,8 +58,10 @@ def main() -> None:
     raw_lof = finngen.read_lof(raw / LOF.rsplit("/", 1)[1])
     summary = finngen.conversion_summary(raw_lof)
     summary.to_csv(data / "finngen_conversion_summary.csv", index=False)
-    print(f"A1FREQ guard: {int(summary['dropped_a1freq'].sum())} of {int(summary['rows_read'].sum())} rows dropped; "
-          f"{int(summary['kept_se_undefined'].sum())} kept rows have undefined se (summary: finngen_conversion_summary.csv)")
+    print(f"{int(summary['rows_read'].sum())} rows read; dropped: {int(summary['dropped_a1freq'].sum())} A1FREQ > 0.5 or missing (C10b), "
+          f"{int(summary['dropped_missing_beta_or_p'].sum())} missing beta/p, "
+          f"{int(summary['dropped_undefined_se_p_lt_1'].sum())} undefined se with p < 1 (C11a); "
+          f"{int(summary['kept_se_undefined'].sum())} kept with undefined se (p = 1) (summary: finngen_conversion_summary.csv)")
     present = sorted(set(raw_lof["PHENO"]))
     frames, missing = [], []
     for trait, eps in finngen.ENDPOINTS.items():

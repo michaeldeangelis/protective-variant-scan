@@ -79,31 +79,49 @@ def guard_a1freq(df: pd.DataFrame):
     return df.loc[ok], dropped
 
 
+def _clean(ep: pd.DataFrame):
+    """One endpoint's raw rows -> (normalized frame, counts). Guards, in order: A1FREQ <= 0.5 (C10b); rows missing gene,
+    BETA or LOG10P; undefined se (SE <= 0 or missing) with p < 1 is a data defect and is dropped (C11a). Undefined-se
+    rows with p = 1 (beta 0) are kept with se = NaN (C10d)."""
+    counts = {"rows_read": len(ep)}
+    ep, _ = guard_a1freq(ep)
+    counts["dropped_a1freq"] = counts["rows_read"] - len(ep)
+    df = ep.rename(columns={"ID": "gene", "BETA": "beta", "SE": "se", "N": "n_total"}).copy()
+    df["gene"] = df["gene"].str.replace(MASK_SUFFIX, "", regex=True)
+    n0 = len(df)
+    df = df.dropna(subset=["gene", "beta", "LOG10P"]).copy()
+    counts["dropped_missing_beta_or_p"] = n0 - len(df)
+    df["se"] = df["se"].where(df["se"] > 0)
+    df["p"] = common.clip_p(np.power(10.0, -df["LOG10P"].astype(float)))
+    df, n_bad = common.drop_undefined_se_p_lt_1(df)
+    counts["dropped_undefined_se_p_lt_1"] = n_bad
+    if n_bad:
+        log.warning("dropped %d rows with undefined se and p < 1", n_bad)
+    counts["kept_se_undefined"] = int(df["se"].isna().sum())
+    df["n_total"] = df["n_total"].astype("int64")
+    df["n_carriers"] = common.approx_carriers(df["A1FREQ"].fillna(0.0), df["n_total"])
+    df["mask"] = MASK
+    counts["rows_out"] = len(df)
+    return df[["gene", "mask", "beta", "se", "p", "n_carriers", "n_total"]].reset_index(drop=True), counts
+
+
+SUMMARY_COLUMNS = ["endpoint", "rows_read", "dropped_a1freq", "dropped_missing_beta_or_p", "dropped_undefined_se_p_lt_1",
+                   "kept_se_undefined", "rows_out"]
+
+
 def conversion_summary(raw: pd.DataFrame) -> pd.DataFrame:
-    """Per-endpoint row counts: read, dropped by the A1FREQ guard, kept with undefined se (se <= 0 or missing)."""
-    kept, dropped = guard_a1freq(raw)
-    out = pd.DataFrame({"rows_read": raw.groupby("PHENO").size()})
-    out["dropped_a1freq"] = dropped.reindex(out.index).fillna(0).astype(int)
-    out["kept_se_undefined"] = (~(kept["SE"] > 0)).groupby(kept["PHENO"]).sum().reindex(out.index).fillna(0).astype(int)
-    return out.reset_index().rename(columns={"PHENO": "endpoint"})
+    """Per-endpoint counts of every drop rule and of kept rows with undefined se (the file data/finngen_conversion_summary.csv)."""
+    rows = [{"endpoint": e, **_clean(g)[1]} for e, g in raw.groupby("PHENO", sort=True)]
+    return pd.DataFrame(rows, columns=SUMMARY_COLUMNS)
 
 
 def normalize_endpoint(raw: pd.DataFrame, endpoint: str) -> pd.DataFrame:
     """One endpoint -> gene, mask, beta, se, p, n_carriers, n_total.
 
     The table has no carrier count: n_carriers ~ 2 * A1FREQ * N, where A1FREQ is the frequency of the collapsed
-    (max-over-sites) genotype; approximate. Rows failing the A1FREQ <= 0.5 guard are dropped (see guard_a1freq). Rows
-    with an undefined se (SE <= 0 or missing) are kept with se = NaN and p intact.
+    (max-over-sites) genotype; approximate. Drop rules and the kept-undefined-se rule are documented in _clean.
     """
-    df = guard_a1freq(raw[raw["PHENO"] == endpoint])[0].rename(columns={"ID": "gene", "BETA": "beta", "SE": "se", "N": "n_total"})
-    df["gene"] = df["gene"].str.replace(MASK_SUFFIX, "", regex=True)
-    df = df.dropna(subset=["gene", "beta", "LOG10P"]).copy()
-    df["se"] = df["se"].where(df["se"] > 0)
-    df["p"] = common.clip_p(np.power(10.0, -df["LOG10P"].astype(float)))
-    df["n_total"] = df["n_total"].astype("int64")
-    df["n_carriers"] = common.approx_carriers(df["A1FREQ"].fillna(0.0), df["n_total"])
-    df["mask"] = MASK
-    return df[["gene", "mask", "beta", "se", "p", "n_carriers", "n_total"]].reset_index(drop=True)
+    return _clean(raw[raw["PHENO"] == endpoint])[0]
 
 
 def build_trait(trait: str, raw: pd.DataFrame) -> pd.DataFrame:
