@@ -193,3 +193,27 @@ Honest framing: this changes the negative control after seeing it fail. Run 1 st
 - A2b (control gate): the negative control is valid iff lambda_GC < 1.10, coverage >= 90 percent, >= 10,000 rows, p = 1 fraction <= 5 percent (all unchanged), AND contaminated genes number at most 0.1 percent of the genes tested (about 18 of roughly 18,500). Beyond that the contamination is systemic: KILL. The 0.1 percent bound was chosen knowing run 1 had 3; it is a post-hoc bound and is disclosed as a limitation.
 - A2c (locus caveat, manual): every PASS or LEAD gene is reported with its chromosome position and a GWAS Catalog lookup of the same trait within 500 kb, recorded in the ledger. Such a neighbouring signal downgrades the gene to "locus-contaminated lead" and it does not count toward PASS or LEAD.
 - A2d: everything else (thresholds, panel, tiers, C1-C11, proxies, verdict definitions) is unchanged. The config pin changes only with the implementing commit, and run 2 is not started until the reviewer re-verifies.
+
+## 2026-09-29 protective-variant-scan RUN 2 RESULT   (under Amendment 2, written after run 1 failed a control)
+
+Run: `python -m protscan run --config config/prereg.yaml --data data --out results/run2-protective-scan.json` at commit be7f43f, config sha256 be698275... (config_matches_ledger = true, not synthetic). Reviewer sign-off for this run: reviews/signoff.md (round 4). Record: results/run2-protective-scan.json, results/run2-report.md. Label on every output: Amendment 2 (post-hoc after run 1).
+
+Controls: all valid. Positive controls (PCSK9 LDL, PCSK9 coronary direction, APOC3 triglycerides) OK; replication sign OK (LDLR arm; PCSK9 arm not run, no informative row, allowed by C11c); synonymous lambda_GC 1.070; contaminated genes 11 of about 18,700 tested (0.059 percent, limit 0.1 percent): CD300LG, CD3EAP, DNM2, HPR, MLXIPL, PHF7, SIDT2, SLC22A3, SLC30A3, TLR9, ZNF224. These 11 (either direction, any trait) are excluded from all tiers. Run 1 counted 3 because it only counted the beneficial direction.
+
+Ladder (gene counts):
+| Rung | Result |
+|---|---|
+| trivial (synonymous mask, discovery rule, beneficial direction) | 3 genes |
+| simplest (pLoF only, one trait at a time, discovery p only) | 8 gene-trait pairs: LDL 7, BMI 1; none for any cognitive or physical trait |
+| incumbent (published top hits) | NOT RUN (no file provided; not fabricated) |
+| candidate (masks consistent, replication, trade-off screen, tiers) | Tier A 1, Tier B 5, Tier C 2, Tier D 0 |
+
+Candidates (all metabolic domain; none qualifies for PASS or LEAD under C2):
+- Tier A: APOC3 (LDL; replicated in FinnGen; lipid-pathway gene).
+- Tier B (not replicable or not replicated): APOB, PCSK9, ANGPTL3 (LDL, lipid-pathway genes), RRBP1 (LDL), GPR151 (BMI).
+- Tier C (beneficial but adverse trade-off): GIGYF1 (LDL lowering; adverse type 2 diabetes and major depression), GCK (LDL lowering; adverse type 2 diabetes).
+
+Verdict by the pre-written rule: KILL, controls valid, neither PASS nor LEAD. This is the negative-result branch. Reported as: no protective pLoF lever for a cognitive or physical trait was detectable in these public tables at this power, under Amendment 2 (post-hoc after run 1).
+What this shows: the pipeline recovers known protective lipid genes (APOB, PCSK9, ANGPTL3, APOC3) and a known BMI gene (GPR151), and the trade-off screen separates protective genes from ones with a cost (GIGYF1, GCK). No brain or body-function gene reached the discovery threshold 1.9e-7.
+What this does not show: that no such variants exist. Power is limited (fluid intelligence and reaction time only for cognition; four panel traits and mortality absent; gene-based pLoF only, discovery threshold stringent for 13 traits); cognitive traits have no independent replication, so LEAD was the ceiling and was not reached. A2c (manual locus lookup) was not needed because there is no PASS or LEAD gene.
+Decision it drives (pre-written): KILL -> negative result stands; thread 1 (cognition cell-type mapping) becomes the primary project.

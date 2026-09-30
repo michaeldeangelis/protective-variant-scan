@@ -1,6 +1,6 @@
 # Protective variant scan
 
-I am testing whether people who carry a broken copy of one gene do better on brain or body measures without paying for it somewhere else. I wrote the rules down first. The scan has not been run on real data yet, so there is no result.
+I tested whether people who carry a broken copy of one gene do better on brain or body measures without paying for it somewhere else. In these public tables, no gene did so for a cognitive or physical trait. The scan did recover the known cholesterol genes, so the method works. This is a negative result with limited power, and it came from a second run under a rule I changed after the first run failed a check.
 
 ## Abstract
 
@@ -10,7 +10,9 @@ Then I wrote a test before opening any results. It uses public summary tables fr
 
 Two limits shaped the design. No independent cohort exists for the continuous brain measures, so those results can reach "lead" at most and never a full pass. Four of the 13 planned traits (numeric memory, pairs matching, years of education, walking pace) and one of the nine health outcomes (all-cause mortality) are not in the public tables, and I did not substitute them. Blood pressure is the only body measure that can produce a full pass.
 
-What exists now is the pipeline, more than 470 passing tests, and an independent reviewer who broke the code by hand in more than 40 ways and had every break caught. What does not exist is a real result. The rules were amended (Amendment 1 and clarifications C1 to C11 in [experiments.md](experiments.md)), each dated before any result was opened. One exception is disclosed there: two FinnGen rows were printed while debugging a file format. Nothing here is about causes, treatment or editing people.
+The first run failed. A check that should find nothing (synonymous variants, which cannot break a gene) found three genes with a "beneficial" signal, probably because nearby common variants leak into the gene. That made the run invalid, and I recorded it as a failure. I then wrote Amendment 2, which drops any gene with a synonymous signal and allows up to 0.1 percent of tested genes to be dropped that way. I wrote it after seeing the failure and chose the 0.1 percent knowing the first run had three, so it is a post-hoc limit. The second run passed every check, dropped 11 of about 18,700 genes, and returned a negative verdict: no gene reached the significance bar for any cognitive or physical trait. Every gene that did (eight, for LDL cholesterol or BMI) is metabolic. It recovered PCSK9, APOB, ANGPTL3 and APOC3 for LDL, and GPR151 for BMI. It also caught genes that help one measure and cost another: GIGYF1 and GCK lower LDL but raise diabetes risk, and GIGYF1 also raises depression risk.
+
+This does not show that no such variants exist. Cognition is covered only by fluid intelligence and reaction time, four planned traits are missing, the bar is strict across 13 traits, and there is no second cohort for the brain measures. The rules were amended before either run's genes were opened (Amendment 1 and clarifications C1 to C11, then Amendment 2, in [experiments.md](experiments.md)). One exception is disclosed there: two FinnGen rows were printed while debugging a file format. The test suite passes (586 tests) and an independent reviewer broke the code by hand in more than 60 ways, and every break is now caught (one needed an added test). Nothing here is about causes, treatment or editing people.
 
 The question and what would count as an answer are in [hypothesis.md](hypothesis.md). The decision rules are in [experiments.md](experiments.md). Data sources, checksums and every normalization choice are in [docs/data-sources.md](docs/data-sources.md).
 
