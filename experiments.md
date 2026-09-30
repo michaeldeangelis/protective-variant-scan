@@ -157,3 +157,11 @@ Data in hand: Genebass discovery via the open REST API (CC BY 4.0), FinnGen R13 
 
 ### 2026-09-29 C8 hold lifted
 The user registered for FinnGen summary-statistics access (confirmation email from the FinnGen service desk, received 5:54 PM on 2026-09-29 and pasted into the session). The C8 hold on opening the FinnGen replication tables is lifted, effective after the C10 fixes and reviewer re-check. FinnGen asks that publications acknowledge "the participants and investigators of the FinnGen study" and cite Kurki et al., Nature 613:508-518 (2023), doi:10.1038/s41586-022-05473-8; recorded in README.md.
+
+### 2026-09-29 Amendment 1 review-2 clarifications C11 (from reviews/review-2.md and signoff.md; decided by the lead before any real-data run)
+
+- C11a (R2-2): A replication row counts toward the replication rule only if its se is finite and > 0 and its beta is nonzero. Rows with undefined se stay available for lambda_GC and coverage counts only. The FinnGen adapter additionally drops and logs any row with undefined se and p < 1 (a data defect), with counts in its conversion summary.
+- C11b (R2-4): lambda_GC for the synonymous control is computed on synonymous rows with p < 1, and both lambdas (with and without p = 1 rows) are reported. If p = 1 rows exceed 5 percent of the synonymous rows, the control is not evaluable (KILL, controls_not_evaluable).
+- C11c (R2-3): In the replication-sign control (C10b), an arm (PCSK9 negative, LDLR positive) is evaluable only if its p < 0.05. At least one arm must be evaluable and every evaluable arm must match its expected sign; otherwise KILL, with the reason recorded as "sign_control_not_evaluable" (no evaluable arm) or "sign_control_failed" (an evaluable arm has the wrong sign). Underpowered arms never count as failures.
+- C11d (R2-5): The positive controls (PCSK9 LDL-lowering; ANGPTL4 or APOC3 triglyceride-lowering) are judged on the discovery effect only (direction and discovery threshold). The trade-off screen, including PCSK9 and type 2 diabetes, never changes control status.
+- Reading rule for any KILL involving the sign control or positive controls: report it as a pipeline/data conclusion only after checking C11c and C11d; a biology conclusion requires all controls valid.
