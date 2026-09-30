@@ -5,10 +5,14 @@ requester-pays and are not used. See docs/data-sources.md for the route, licence
 """
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 
 from . import common
+
+log = logging.getLogger(__name__)
 
 SOURCE = "genebass"
 COHORT = "discovery"
@@ -67,14 +71,15 @@ def qc_pass(qc_records) -> pd.DataFrame:
     return q.loc[keep, ["gene_id", "CAF"]].drop_duplicates("gene_id")
 
 
-def normalize_analysis(records, qc_records, mask: str, n_total: int) -> pd.DataFrame:
+def normalize_analysis(records, qc_records, mask: str, n_total: int, stats: dict | None = None) -> pd.DataFrame:
     """One analysis x one burden set -> gene, mask, beta, se, p, n_carriers, n_total.
 
     p is Pvalue_Burden so that p, beta and the reconstructed se describe the same test (SKAT-O p is not used).
     The gene-manhattan endpoint returns no SE and no carrier count: se = |beta| / z(p); n_carriers ~ 2 * CAF * N
     (CAF is gene-level and not phenotype-specific, so the count is approximate). Symbols shared by more than one
-    Ensembl gene are ambiguous and dropped. Rows whose se is undefined (beta 0 or p 1) are kept with se = NaN and p
-    intact, because lambda_GC and hit counts use p only.
+    Ensembl gene are ambiguous and dropped. Rows whose se is undefined with p = 1 are kept with se = NaN and p intact
+    (C10d: lambda_GC and hit counts use p only); an undefined se with p < 1 (beta exactly 0) is a data defect and is
+    dropped and logged (C11a). If `stats` is given it receives rows_in, dropped_undefined_se_p_lt_1, kept_se_undefined.
     """
     df = pd.DataFrame(records)
     df = df.rename(columns={"gene_symbol": "gene", "BETA_Burden": "beta", "Pvalue_Burden": "p"})
@@ -84,6 +89,12 @@ def normalize_analysis(records, qc_records, mask: str, n_total: int) -> pd.DataF
     df = df[~df["gene"].duplicated(keep=False)].copy()
     df["se"] = common.se_from_beta_p(df["beta"], df["p"])
     df["p"] = common.clip_p(df["p"])
+    rows_in = len(df)
+    df, n_bad = common.drop_undefined_se_p_lt_1(df)
+    if n_bad:
+        log.warning("genebass %s: dropped %d rows with undefined se and p < 1", mask, n_bad)
+    if stats is not None:
+        stats.update(rows_in=rows_in, dropped_undefined_se_p_lt_1=n_bad, kept_se_undefined=int(df["se"].isna().sum()))
     df["n_total"] = int(n_total)
     df["n_carriers"] = common.approx_carriers(df["CAF"].fillna(0.0), df["n_total"])
     df["mask"] = mask

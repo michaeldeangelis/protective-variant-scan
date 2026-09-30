@@ -27,7 +27,7 @@ def raw(tmp_path):
 
 def test_read_lof_filters_endpoints_and_additive_test(raw):
     assert set(raw["PHENO"]) == {"E4_HYPERCHOL", "E4_OBESITY", "I9_HYPTENS", "N14_FEMALEINFERT", "N14_MALEINFERT"}
-    assert (raw["TEST"] == "ADD").all() and len(raw) == 10
+    assert (raw["TEST"] == "ADD").all() and len(raw) == 13
 
 
 def test_normalize_endpoint(raw):
@@ -47,23 +47,43 @@ def test_undefined_se_rows_are_kept_with_nan_se_and_p_intact(raw):
 
 def test_a1freq_guard_drops_and_counts_failures(raw, caplog):
     kept, dropped = finngen.guard_a1freq(raw)
-    assert (kept["A1FREQ"] <= 0.5).all() and len(kept) == 8
+    assert (kept["A1FREQ"] <= 0.5).all() and len(kept) == 11
     assert dropped.to_dict() == {"E4_OBESITY": 2}  # A1FREQ 0.7 and A1FREQ missing both fail
     assert "dropped 2 rows" in caplog.text
     ob = finngen.normalize_endpoint(raw, "E4_OBESITY")
     assert list(ob["gene"]) == ["GENEA"]
 
 
+def test_c11a_undefined_se_with_p_below_1_is_dropped_but_p1_rows_stay(raw):
+    ob = finngen.normalize_endpoint(raw, "E4_OBESITY")
+    assert list(ob["gene"]) == ["GENEA"]  # GENEE: se 0 with p 1e-9 is a data defect
+    hc = finngen.normalize_endpoint(raw, "E4_HYPERCHOL").set_index("gene")
+    assert sorted(hc.index) == ["GENEA", "GENEB", "GENED"]  # GENEF: se missing, p 1e-3; GENEG: p missing
+    assert np.isnan(hc.loc["GENED", "se"]) and hc.loc["GENED", "p"] == 1.0  # beta 0 / p 1 stays (C10d)
+    assert hc["se"].isna().sum() == 1
+
+
 def test_conversion_summary_counts(raw):
-    s = finngen.conversion_summary(raw).set_index("endpoint")
-    assert s.loc["E4_OBESITY", "rows_read"] == 3 and s.loc["E4_OBESITY", "dropped_a1freq"] == 2
-    assert s.loc["E4_HYPERCHOL", "kept_se_undefined"] == 1 and s.loc["I9_HYPTENS", "kept_se_undefined"] == 1
-    assert s["dropped_a1freq"].sum() == 2
+    full = finngen.conversion_summary(raw)
+    assert list(full.columns) == finngen.SUMMARY_COLUMNS
+    s = full.set_index("endpoint")
+    ob = s.loc["E4_OBESITY"]
+    assert (ob["rows_read"], ob["dropped_a1freq"], ob["dropped_undefined_se_p_lt_1"], ob["rows_out"]) == (4, 2, 1, 1)
+    hc = s.loc["E4_HYPERCHOL"]
+    assert (hc["rows_read"], hc["dropped_missing_beta_or_p"], hc["dropped_undefined_se_p_lt_1"]) == (5, 1, 1)
+    assert (hc["kept_se_undefined"], hc["rows_out"]) == (1, 3)
+    assert s.loc["I9_HYPTENS", "kept_se_undefined"] == 1 and s.loc["I9_HYPTENS", "rows_out"] == 1
+    assert s["dropped_a1freq"].sum() == 2 and s["dropped_undefined_se_p_lt_1"].sum() == 2
+    reconciled = s["rows_read"] - s["dropped_a1freq"] - s["dropped_missing_beta_or_p"] - s["dropped_undefined_se_p_lt_1"]
+    assert (reconciled == s["rows_out"]).all()
 
 
-def test_kept_rows_never_exceed_half_allele_frequency(raw):
-    frames = [finngen.normalize_endpoint(raw, e) for e in ("E4_HYPERCHOL", "E4_OBESITY", "I9_HYPTENS")]
-    assert sum(len(f) for f in frames) == 5
+def test_rows_failing_the_a1freq_guard_never_reach_the_output(raw):
+    failing = raw[~(raw["A1FREQ"] <= 0.5)]
+    assert len(failing) == 2
+    for _, row in failing.iterrows():
+        out = finngen.normalize_endpoint(raw, row["PHENO"])
+        assert row["ID"].split(".")[0] not in set(out["gene"])
 
 
 def test_proxy_rows_pass_the_pipeline_schema(raw):

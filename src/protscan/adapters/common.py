@@ -92,18 +92,27 @@ def approx_carriers(af, n_total):
     return np.minimum(np.round(2.0 * np.asarray(af, dtype=float) * n_total), n_total)
 
 
+def drop_undefined_se_p_lt_1(df: pd.DataFrame):
+    """C11a data-defect rule: a row with undefined se (NaN) and p < 1 is dropped; beta 0 / p 1 rows (se undefined, p = 1)
+    stay. Returns (kept, number dropped)."""
+    bad = df["se"].isna() & (df["p"] < 1)
+    return df.loc[~bad], int(bad.sum())
+
+
 def ivw_combine(frames, n_rule: str) -> pd.DataFrame:
     """Fixed-effect inverse-variance meta-analysis of several results for one trait, per (gene, mask).
 
-    frames: DataFrames with gene, mask, beta, se, n_carriers, n_total (one per component analysis).
+    frames: DataFrames with gene, mask, beta, se, p, n_carriers, n_total (one per component analysis).
     n_rule: 'sum' when the components use disjoint people (sexes); 'max' when they reuse the same people.
     A gene present in only one component keeps that component's estimate. Components with an undefined se (NaN) cannot
     be weighted: they are ignored when another component has a defined se; a gene with no defined se in any component
-    is kept with beta = mean, p = max, se = NaN (such rows are beta 0 or p 1, so they stay uninformative).
+    is kept with beta = mean, p = max, se = NaN only if p >= 1 (C11a); other undefined-se rows are dropped.
     """
     if n_rule not in ("sum", "max"):
         raise ValueError("n_rule must be 'sum' or 'max'")
     df = pd.concat(frames, ignore_index=True)
+    if "p" not in df.columns:
+        df["p"] = np.nan  # no p supplied: undefined-se rows cannot be shown uninformative, so they are dropped
     key = ["gene", "mask"]
     n_agg = {"n_carriers": n_rule, "n_total": n_rule}
     ok = df[df["se"] > 0].copy()
@@ -116,7 +125,7 @@ def ivw_combine(frames, n_rule: str) -> pd.DataFrame:
     cols = ["gene", "mask", "beta", "se", "p", "n_carriers", "n_total"]
     bad = df[~(df["se"] > 0)]
     bad = bad.merge(g[key], on=key, how="left", indicator=True)
-    bad = bad[bad["_merge"] == "left_only"]
+    bad = bad[(bad["_merge"] == "left_only") & (bad["p"] >= 1)]
     if len(bad):
         u = bad.groupby(key, sort=True).agg({"beta": "mean", "p": "max", **n_agg}).reset_index()
         u["se"] = np.nan
