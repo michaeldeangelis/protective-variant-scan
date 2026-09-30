@@ -1689,3 +1689,31 @@ def test_c10g_synthetic_and_real_sources_cannot_be_mixed(tmp_path):
         load_burden(tmp_path)
     with pytest.raises(ValueError, match="mixes synthetic"):
         run_pipeline(CONFIG_PATH, tmp_path, tmp_path / "o" / "r.json")
+
+
+# ---------------- review-2 documented residual gaps (non-strict xfail) ----------------
+def _deflation_masked_table(null_table, frac_p1=0.45, inflate=2.0):
+    """Informative synonymous rows inflated by a factor, diluted with uninformative p = 1 rows (C10d keeps them)."""
+    df = null_table.copy()
+    syn_idx = df.index[(df["mask"] == "syn") & df["gene"].str.startswith("NULLG")]
+    z = np.clip(df.loc[syn_idx, "beta"] / df.loc[syn_idx, "se"] * inflate, -4.0, 4.0)   # no tail hits: isolate lambda
+    df.loc[syn_idx, "p"] = 2 * norm.sf(np.abs(z))
+    n1 = int(len(syn_idx) * frac_p1)
+    df.loc[syn_idx[:n1], "p"] = 1.0
+    df.loc[syn_idx[:n1], "beta"] = 0.0
+    df.loc[syn_idx[:n1], "se"] = float("nan")
+    return df, syn_idx[n1:]
+
+
+def test_c10d_deflation_masking_setup_is_a_real_inflation(null_table):
+    """Sanity for the xfail below: the informative synonymous rows alone are strongly inflated (lambda well above 1.10)."""
+    df, informative = _deflation_masked_table(null_table)
+    lam = float(np.median(chi2.isf(np.clip(df.loc[informative, "p"].to_numpy(), 1e-300, 1.0), 1)) / CHI2_MEDIAN)
+    assert lam > 3.0
+
+
+@pytest.mark.xfail(strict=False, reason="R2-4: rows with p = 1 kept for lambda_GC (C10d) can mask inflation of the informative rows")
+def test_c10d_lambda_control_is_not_masked_by_uninformative_rows(null_table, cfg):
+    df, _ = _deflation_masked_table(null_table)
+    n = neg_of(df, cfg)
+    assert n["status"] != "OK"
