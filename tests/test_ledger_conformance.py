@@ -2026,3 +2026,13 @@ def test_c11a_adverse_screen_is_deliberately_not_filtered_by_informativeness(cfg
     r[5] = NAN
     rows.append(r)
     assert tier_map(rows, cfg)[("GA", "systolic_bp")] == "C"
+
+
+def test_c11d_positive_control_still_requires_the_pipeline_discovery_hit(null_table, cfg, monkeypatch):
+    """If the pipeline's own hit path does not return PCSK9/LDL, the control fails even though the direct row test passes."""
+    monkeypatch.setattr(tiering, "build_hits", lambda d, c: pd.DataFrame(columns=["gene", "trait", "tier"]))
+    c = controls.positive_controls(validate(null_table), cfg)
+    ldl = [p for p in c if p["id"] == "pcsk9_ldl_lower"][0]
+    assert ldl["status"] == "FAIL" and ldl["tested"][0]["pipeline_tier"] is None
+    # controls not routed through the hit path (coronary direction, triglycerides) are unaffected
+    assert [p["status"] for p in c if p["id"] != "pcsk9_ldl_lower"] == ["OK", "OK"]
