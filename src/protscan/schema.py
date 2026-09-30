@@ -16,7 +16,7 @@ DOMAINS = ("cognitive", "physical", "metabolic")
 
 
 # C10c: sha256 of the committed config/prereg.yaml. Changes only with a dated ledger entry.
-PINNED_CONFIG_SHA256 = "7ce18c381814ba0bdfbd56ff6afa236a413bba5752517ebb901b1de74f834b83"
+PINNED_CONFIG_SHA256 = "be69827539daac4c78b4c8f6ac7d931723abb41ab0e739c0505c357689310a9f"
 
 
 @dataclass(frozen=True)
@@ -35,7 +35,7 @@ class Config:
     tradeoff_p: float
     min_tradeoffs_screened: int
     lambda_gc_max: float
-    syn_hits_max: int
+    syn_contaminated_max_fraction: float
     syn_min_coverage: float
     syn_min_rows: int
     syn_max_p1_fraction: float
@@ -102,6 +102,8 @@ def load_config(path) -> Config:
     min_screened = int(y["tradeoff_screen"]["min_tradeoffs_screened"])
     if not 1 <= min_screened <= len(tradeoff_sign):
         raise ValueError("tradeoff_screen.min_tradeoffs_screened must be between 1 and N_tradeoff")
+    if not 0 < float(y["controls"]["syn_contaminated_max_fraction"]) < 1:
+        raise ValueError("controls.syn_contaminated_max_fraction must be in (0, 1)")
     for c in y["controls"]["replication_sign"]:
         if c["expected_beta_sign"] not in (1, -1):
             raise ValueError(f"replication_sign {c['id']}: expected_beta_sign must be +1 or -1")
@@ -124,7 +126,7 @@ def load_config(path) -> Config:
         tradeoff_p=float(y["tradeoff_screen"]["alpha"]) / len(tradeoff_sign),
         min_tradeoffs_screened=min_screened,
         lambda_gc_max=float(y["controls"]["lambda_gc_max"]),
-        syn_hits_max=int(y["controls"]["syn_hits_max"]),
+        syn_contaminated_max_fraction=float(y["controls"]["syn_contaminated_max_fraction"]),
         syn_min_coverage=float(y["controls"]["syn_min_coverage"]),
         syn_min_rows=int(y["controls"]["syn_min_rows"]),
         syn_max_p1_fraction=float(y["controls"]["syn_max_p1_fraction"]),

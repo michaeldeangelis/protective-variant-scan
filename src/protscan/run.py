@@ -93,6 +93,21 @@ def _absent(df: pd.DataFrame, cfg: Config) -> dict:
     return {"discovery": sorted(disc_expected - have("discovery")), "replication": sorted(rep_expected - have("replication"))}
 
 
+AMENDMENT_2 = "Amendment 2 (post-hoc after run 1)"
+
+
+def _contamination(df: pd.DataFrame, cfg: Config, ctrl: dict) -> dict:
+    """A2a record: contaminated genes with their synonymous traits and the pLoF hits that were excluded because of them."""
+    contam = stats.contaminated_genes(df, cfg)
+    unfiltered = stats.discovery_hits(df, cfg)
+    n_tested = int(df.loc[(df["cohort"] == "discovery") & (df["mask"] == "syn"), "gene"].nunique())
+    genes = [{"gene": g, "syn_hits": contam[g],
+              "excluded_plof_hit_traits": sorted(unfiltered.loc[unfiltered["gene"] == g, "trait"])} for g in sorted(contam)]
+    return {"rule": "A2a", "amendment": AMENDMENT_2, "n_contaminated": len(contam), "n_genes_tested": n_tested,
+            "fraction": len(contam) / n_tested if n_tested else None, "max_fraction": cfg.syn_contaminated_max_fraction,
+            "within_bound": ctrl["negative_synonymous"].get("contamination_ok"), "genes": genes}
+
+
 def _jsonable(o):
     if isinstance(o, (np.integer,)):
         return int(o)
@@ -137,9 +152,12 @@ def run_pipeline(config_path, data_dir, out_path) -> dict:
     synthetic = any(s.startswith("synthetic") for v in sources.values() for s in v)
     matches = cfg.sha256 == PINNED_CONFIG_SHA256
     verdict = decide(ctrl, hits)
+    contamination = _contamination(df, cfg, ctrl)
     verdict.update(
-        synthetic=synthetic, config_matches_ledger=matches,
-        label=verdict["verdict"] + (" [SYNTHETIC DATA]" if synthetic else "") + ("" if matches else " [NON-PREREGISTERED]"))
+        synthetic=synthetic, config_matches_ledger=matches, amendment=AMENDMENT_2,
+        contaminated_excluded=[g["gene"] for g in contamination["genes"]],
+        label=verdict["verdict"] + (" [SYNTHETIC DATA]" if synthetic else "") + ("" if matches else " [NON-PREREGISTERED]")
+        + f" [{AMENDMENT_2}]")
     results = {
         "ledger_entry": cfg.ledger_entry,
         "config_sha256": cfg.sha256,
@@ -162,6 +180,7 @@ def run_pipeline(config_path, data_dir, out_path) -> dict:
             "replication_sign_max_p": cfg.replication_sign_max_p, "syn_max_p1_fraction": cfg.syn_max_p1_fraction,
         },
         "controls": ctrl,
+        "contamination": contamination,
         "rungs": _rungs(cfg, ctrl, disc, hits, incumbent),
         "tiers": {t: records(t) for t in "ABCD"},
         "verdict": verdict,

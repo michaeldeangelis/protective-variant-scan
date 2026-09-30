@@ -155,10 +155,11 @@ def test_negative_control_thresholds():
     ok = controls.negative_control(table(*base), cfg)
     assert ok["status"] == "OK" and ok["coverage"] == 1.0
     hit = controls.negative_control(table(*base, row("H", "fev1", mask="syn", beta=0.5, p=1e-9)), cfg)
-    assert hit["status"] == "FAIL" and hit["n_syn_hit_genes"] == 1 and hit["lambda_ok"]
-    # a hit in the harmful direction does not count
+    # A2b: one contaminated gene among 10,001 is within the 0.1 percent bound (the old zero-hit gate is gone)
+    assert hit["status"] == "OK" and hit["n_syn_hit_genes"] == 1 and hit["n_contaminated"] == 1 and hit["lambda_ok"]
+    # a harmful-direction hit is contaminated too (either direction) but is not part of the old beneficial-direction count
     wrong = controls.negative_control(table(*base, row("H", "fev1", mask="syn", beta=-0.5, p=1e-9)), cfg)
-    assert wrong["status"] == "OK"
+    assert wrong["status"] == "OK" and wrong["n_syn_hit_genes"] == 0 and wrong["n_contaminated"] == 1
     assert controls.negative_control(table(*_syn_universe(10_000, p_power=1.5)), cfg)["status"] == "FAIL"
     assert controls.negative_control(table(row("A", "fev1")), cfg)["status"] == "NOT RUN"
 

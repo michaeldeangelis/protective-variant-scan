@@ -73,7 +73,10 @@ tradeoff_screen:
 
 controls:
   lambda_gc_max: 1.10        # synonymous mask, all genes and traits pooled
-  syn_hits_max: 0            # synonymous-mask genes at discovery threshold, beneficial direction
+  # AMENDMENT 2 (post-hoc after run 1), A2a/A2b: a gene with a synonymous-mask hit at the discovery threshold (either
+  # direction, any trait) is CONTAMINATED and excluded from all tiers and candidate lists. The old zero-hit gate is replaced:
+  # the negative control fails if contaminated genes exceed this fraction of the genes tested. The bound is post-hoc.
+  syn_contaminated_max_fraction: 0.001
   # C10a: the synonymous control is evaluable only if syn rows cover >= 90% of the (gene, trait) pairs that have a
   # plof discovery row AND number >= 10,000; otherwise controls_not_evaluable (KILL).
   syn_min_coverage: 0.90

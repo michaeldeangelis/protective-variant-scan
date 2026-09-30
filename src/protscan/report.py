@@ -38,6 +38,9 @@ def render(res: dict) -> str:
           "Sources: " + "; ".join(f"{k}: {', '.join(s)}" for k, s in d["sources"].items()), ""]
 
     L += [f"## Verdict: {v['label']}", "", v["reason"], ""]
+    L += [f"Rules active: **{v['amendment']}**. The synonymous negative control was changed after run 1 failed under the original "
+          "zero-hit rule (contamination filter A2a, bound A2b; the 0.1 percent bound is post-hoc). A PASS or LEAD here is "
+          "'passed under Amendment 2, which was written after run 1 failed', never a clean preregistered pass.", ""]
     if v["verdict"] == "LEAD":
         L += ["UNREPLICATED lead only. Not a replicated protective lever.", ""]
     if v["verdict"] == "KILL" and v["reason"].startswith("controls_not_evaluable"):
@@ -57,8 +60,11 @@ def render(res: dict) -> str:
         L.append(f"| synonymous lambda_GC < {_fmt(n['lambda_gc_max'])} | {'OK' if n['lambda_ok'] else 'FAIL'} | "
                  f"lambda_GC = {n['lambda_gc']:.3f} on rows with p < 1; {n['lambda_gc_all_rows']:.3f} on all {n['n_rows']} rows; "
                  f"p = 1 rows: {n['n_p1_rows']} ({n['p1_fraction']:.3f}, max {n['syn_max_p1_fraction']}) |")
-        L.append(f"| synonymous genes at discovery threshold (beneficial) <= {n['syn_hits_max']} | "
-                 f"{'OK' if n['syn_hits_ok'] else 'FAIL'} | {n['n_syn_hit_genes']} genes {', '.join(n['syn_hit_genes'][:10])} |")
+        L.append(f"| synonymous contaminated genes (A2b) <= {n['contaminated_max_fraction']:.4f} of genes tested | "
+                 f"{'OK' if n['contamination_ok'] else 'FAIL'} | {n['n_contaminated']} of {n['n_genes_tested']} genes "
+                 f"(fraction {n['contaminated_fraction']:.5f}, limit {n['contaminated_max_fraction']:.4f}) |")
+        L.append(f"| old gate, informational: beneficial-direction synonymous hits on panel traits | n/a | "
+                 f"{n['n_syn_hit_genes']} genes {', '.join(n['syn_hit_genes'][:10])} (was: limit 0, replaced by A2b) |")
     for p in c["positive"]:
         det = "; ".join(f"{t['gene']} beta={t['beta']:.3g} p={t['p']:.2g}"
                         + (f" tier={t['pipeline_tier']}" if "pipeline_tier" in t else "") for t in p["tested"]) or "no rows for these genes/trait"
@@ -80,10 +86,25 @@ def render(res: dict) -> str:
               "that the sign-control arms were adequately powered (C11c) and that the positive controls were judged on the discovery effect "
               "alone (C11d). A biology conclusion requires all controls valid.", ""]
 
+    ct = res["contamination"]
+    L += [f"## Contaminated genes (A2a): {ct['n_contaminated']} of {ct['n_genes_tested']} genes tested", "",
+          "Genes with a synonymous-mask hit at the discovery threshold (either direction, any trait). They are excluded from all "
+          "tiers and candidate lists below." + ("" if ct["within_bound"] is not False else " The count exceeds the A2b bound: control FAIL."), ""]
+    if ct["genes"]:
+        L += ["| gene | synonymous hits (trait, beta, p) | pLoF panel hits excluded |", "|---|---|---|"]
+        for g in ct["genes"][:MAX_ROWS]:
+            sh = "; ".join(f"{h['trait']} (beta={_fmt(h['beta'])}, p={_fmt(h['p'])})" for h in g["syn_hits"])
+            L.append(f"| {g['gene']} | {sh} | {', '.join(g['excluded_plof_hit_traits']) or '-'} |")
+        if len(ct["genes"]) > MAX_ROWS:
+            L.append(f"... {len(ct['genes']) - MAX_ROWS} more in the JSON")
+    else:
+        L.append("(none)")
+    L += [""]
+
     L += ["## Baseline ladder (genes passing at each rung)", "", "| rung | status | genes | note |", "|---|---|---|---|"]
     t, s, i, k = rg["trivial"], rg["simplest"], rg["incumbent"], rg["candidate"]
     L.append(f"| trivial (synonymous mask) | {t['status']} | {t['n_genes'] if t['n_genes'] is not None else 'NA'} | expected 0 |")
-    L.append(f"| simplest (pLoF, per trait, discovery p only) | {s['status']} | {s['n_genes']} | {s['n_gene_trait_pairs']} gene-trait pairs |")
+    L.append(f"| simplest (pLoF, per trait, discovery p only; no filters, contaminated genes included) | {s['status']} | {s['n_genes']} | {s['n_gene_trait_pairs']} gene-trait pairs |")
     if i["status"] == "NOT RUN":
         L.append(f"| incumbent (published top hits) | NOT RUN | NA | {i['reason']} |")
     else:
@@ -111,6 +132,8 @@ def render(res: dict) -> str:
               "'Both masks consistent' is direction-only agreement between pLoF and missense|LC, weaker than intended.",
               "- C7: cognitive coverage is limited to fluid intelligence and reaction time; numeric memory, pairs matching, "
               "education years, walking pace and all-cause mortality are absent from the discovery source.",
+              "- A2c (manual, not automated): every PASS or LEAD gene needs its chromosome position and a GWAS Catalog lookup of the same "
+              "trait within 500 kb; a neighbouring signal downgrades it to a locus-contaminated lead that does not count.",
               ""]
     L += ["## Notes", "",
           "- Replication counts only a cohort independent of UK Biobank; only traits with a declared proxy (LDL, BMI, SBP) can reach Tier A. "

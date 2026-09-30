@@ -56,6 +56,16 @@ def informative(r: pd.DataFrame) -> pd.DataFrame:
     return r[np.isfinite(r["se"]) & (r["se"] > 0) & (r["beta"] != 0)]
 
 
+def contaminated_genes(df: pd.DataFrame, cfg: Config) -> dict:
+    """A2a: gene -> synonymous-mask associations at the discovery threshold, either direction, any trait (discovery cohort)."""
+    r = _rows(df, "discovery", "syn")
+    r = r[r["p"] < cfg.discovery_p]
+    out = {}
+    for row in r.sort_values(["gene", "p"]).itertuples():
+        out.setdefault(row.gene, []).append({"trait": row.trait, "beta": float(row.beta), "p": float(row.p)})
+    return out
+
+
 def replication_status(hits: pd.DataFrame, df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
     """Independent-cohort replication. Only traits with a declared proxy can replicate (Amendment 1).
 

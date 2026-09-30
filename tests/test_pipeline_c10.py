@@ -156,7 +156,8 @@ def test_committed_config_is_preregistered(make):
 
 def test_edited_config_is_stamped_non_preregistered_and_cli_exits_nonzero(make, tmp_path):
     loose = tmp_path / "loose.yaml"
-    loose.write_text(CONFIG.read_text().replace("syn_hits_max: 0", "syn_hits_max: 3"))
+    loose.write_text(CONFIG.read_text().replace("syn_contaminated_max_fraction: 0.001", "syn_contaminated_max_fraction: 0.5"))
+    assert loose.read_text() != CONFIG.read_text()
     d = make("broken_syn_hit", "loose")
     r = run(d, loose)
     assert r["config_matches_ledger"] is False and r["verdict"]["config_matches_ledger"] is False
@@ -178,7 +179,7 @@ def test_undefined_se_rows_are_kept_for_lambda_and_hit_counting():
     df = table(rows)
     assert df.attrs["dropped_nan_rows"] == 0 and df["se"].isna().sum() == 2
     c = controls.negative_control(df, cfg)
-    assert c["n_rows"] == 10_002 and c["status"] == "FAIL" and c["syn_hit_genes"] == ["Z2"]
+    assert c["n_rows"] == 10_002 and c["status"] == "OK" and c["syn_hit_genes"] == ["Z2"] and c["n_contaminated"] == 1
     assert table([dict(row("A", "fev1"), beta=np.nan)]).empty       # missing beta or p is still dropped
 
 
@@ -265,7 +266,7 @@ def test_positive_control_uses_pipeline_discovery_path_and_ignores_tradeoffs():
 
 def test_positive_control_not_in_pipeline_hits_fails(monkeypatch):
     df = table([row("PCSK9", "ldl", beta=-0.8, p=1e-30)])
-    monkeypatch.setattr(tiering, "build_hits", lambda d, c: pd.DataFrame(columns=["gene", "trait", "tier"]))
+    monkeypatch.setattr(stats, "discovery_hits", lambda d, c, mask="plof": pd.DataFrame(columns=["gene", "trait"]))
     assert controls.positive_controls(df, cfg)[0]["status"] == "FAIL"
 
 

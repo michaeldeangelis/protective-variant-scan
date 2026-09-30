@@ -23,6 +23,7 @@ def assign_tier(adverse: list, rep_status: str, unscreened: bool = False) -> str
 def build_hits(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
     """One row per discovery hit (gene x panel trait) with all annotations and its tier."""
     hits = stats.discovery_hits(df, cfg)
+    hits = hits[~hits["gene"].isin(set(stats.contaminated_genes(df, cfg)))].reset_index(drop=True)   # A2a
     if hits.empty:
         cols = ["gene", "trait", "beta", "se", "p", "n_carriers", "domain", "rep_status", "rep_trait", "rep_beta",
                 "rep_p_onesided", "adverse", "n_tradeoff_tested", "tradeoff_unscreened", "harmful_panel", "mask_status", "eur_status", "tier",

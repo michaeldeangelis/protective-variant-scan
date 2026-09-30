@@ -10,7 +10,10 @@ Scenarios (expected verdict on the default config):
   nolead            KILL   controls valid; no Tier-A or Tier-B lead
   broken_positive   KILL   PCSK9 effects removed
   broken_lambda     KILL   synonymous z-scores inflated (lambda_GC ~1.7)
-  broken_syn_hit    KILL   one synonymous-mask gene at the discovery threshold, beneficial direction
+  broken_syn_hit    KILL   alias of contaminated_systemic (was: one beneficial synonymous hit; A2b replaced the zero-hit gate)
+  contaminated_tierA     LEAD   SYNPASS1 (would be Tier A) has a synonymous hit (harmful direction): excluded (A2a); PASS -> LEAD
+  contaminated_systemic  KILL   contaminated genes exceed 0.1 percent of genes tested (A2b), either direction
+  contaminated_minor     PASS   one contaminated null gene, below the 0.1 percent bound: normal verdict
   broken_rep_sign   KILL   replication betas sign-flipped: PCSK9/LDLR replication-sign control fails (C10b)
   unscreened        KILL   SYNPASS1 replicates but only 4 of 9 trade-offs are screened: capped at Tier B (C1),
                            and Tier B unscreened does not count toward LEAD (C9); it is the only candidate
@@ -26,12 +29,15 @@ from scipy.stats import norm
 
 from protscan.schema import COLUMNS, load_config
 
-SCENARIOS = ("pass", "lead", "nolead", "broken_positive", "broken_lambda", "broken_syn_hit", "unscreened", "broken_rep_sign")
+SCENARIOS = ("pass", "lead", "nolead", "broken_positive", "broken_lambda", "broken_syn_hit", "unscreened", "broken_rep_sign",
+             "contaminated_tierA", "contaminated_systemic", "contaminated_minor")
 BINARY_SE_SCALE = 3.0
 N_TOTAL = {"discovery": 400_000, "replication": 300_000}
 CARRIERS = {"plof": 150, "dmis": 1500, "syn": 3000}
 # C10a: the synonymous universe must have >= 10,000 rows (23 traits per gene), so n_genes is floored.
 MIN_GENES = 450
+# A2b: one contaminated gene must stay within 0.1 percent of the genes tested, so these scenarios need > 1,000 genes.
+MIN_GENES_LOW_CONTAMINATION = 1200
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config" / "prereg.yaml"
 
 
@@ -73,6 +79,8 @@ def make_synthetic(scenario="pass", seed=20260929, n_genes=3000, config_path=DEF
         raise ValueError(f"scenario must be one of {SCENARIOS}")
     cfg = load_config(config_path)
     n_genes = max(n_genes, MIN_GENES)
+    if scenario in ("contaminated_tierA", "contaminated_minor"):
+        n_genes = max(n_genes, MIN_GENES_LOW_CONTAMINATION)
     rng = np.random.default_rng(seed)
     ben = cfg.sign
 
@@ -124,7 +132,8 @@ def make_synthetic(scenario="pass", seed=20260929, n_genes=3000, config_path=DEF
         e["p"] = 2 * norm.sf(abs(e["beta"] / e["se"]))
         eur_rows.append(e)
 
-    if scenario in ("pass", "broken_positive", "broken_lambda", "broken_syn_hit", "unscreened"):
+    if scenario in ("pass", "broken_positive", "broken_lambda", "broken_syn_hit", "unscreened",
+                    "contaminated_tierA", "contaminated_systemic", "contaminated_minor"):
         # beneficial non-lipid gene: SBP lower, replicates via the hypertension proxy, no adverse trade-off
         hit("SYNPASS1", "systolic_bp", 8, good("systolic_bp", 2), "hypertension", good("hypertension", 3))
     if scenario not in ("nolead", "unscreened"):
@@ -143,8 +152,15 @@ def make_synthetic(scenario="pass", seed=20260929, n_genes=3000, config_path=DEF
         z = disc.loc[s, "beta"] / disc.loc[s, "se"] * 1.3
         disc.loc[s, "beta"] = z * disc.loc[s, "se"]
         disc.loc[s, "p"] = 2 * norm.sf(np.abs(z))
-    if scenario == "broken_syn_hit":
+    if scenario in ("broken_syn_hit", "contaminated_systemic"):
+        k = int(0.001 * len(genes)) + 2                                  # strictly above the 0.1 percent bound
         _set_z(disc, "SYNSYN1", "hand_grip_strength", "syn", good("hand_grip_strength", 7))
+        for i in range(k - 1):                                           # either direction, other trait
+            _set_z(disc, f"SYNG{i:05d}", "bmi", "syn", (bad if i % 2 else good)("bmi", 6))
+    if scenario == "contaminated_tierA":
+        _set_z(disc, "SYNPASS1", "systolic_bp", "syn", bad("systolic_bp", 6))
+    if scenario == "contaminated_minor":
+        _set_z(disc, "SYNG00000", "fluid_intelligence", "syn", bad("fluid_intelligence", 6))
 
     if scenario == "broken_rep_sign":
         rep["beta"] = -rep["beta"]

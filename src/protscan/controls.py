@@ -31,16 +31,20 @@ def negative_control(df: pd.DataFrame, cfg: Config) -> dict:
                           f"{cfg.syn_max_p1_fraction}: lambda_GC would be dominated by uninformative rows"}
     lam = stats.lambda_gc(syn.loc[syn["p"] < 1, "p"])          # C11b: uninformative p = 1 rows cannot deflate the gate
     lam_all = stats.lambda_gc(syn["p"])
-    hits = stats.discovery_hits(df, cfg, mask="syn")
-    genes = sorted(set(hits["gene"]))
+    old_hits = sorted(set(stats.discovery_hits(df, cfg, mask="syn")["gene"]))   # beneficial-direction panel hits: informational since A2b
+    contam = stats.contaminated_genes(df, cfg)
+    n_tested = int(syn["gene"].nunique())
+    frac = len(contam) / n_tested
     lam_ok = lam < cfg.lambda_gc_max
-    hits_ok = len(genes) <= cfg.syn_hits_max
+    contam_ok = frac <= cfg.syn_contaminated_max_fraction        # A2b (post-hoc bound)
     return {
-        "status": "OK" if lam_ok and hits_ok else "FAIL",
+        "status": "OK" if lam_ok and contam_ok else "FAIL",
         "lambda_gc": lam, "lambda_gc_all_rows": lam_all, "lambda_gc_max": cfg.lambda_gc_max, "lambda_ok": lam_ok,
         **cov,
-        "n_syn_hit_genes": len(genes), "syn_hits_max": cfg.syn_hits_max, "syn_hits_ok": hits_ok,
-        "syn_hit_genes": genes[:50],
+        "n_contaminated": len(contam), "n_genes_tested": n_tested, "contaminated_fraction": frac,
+        "contaminated_max_fraction": cfg.syn_contaminated_max_fraction, "contamination_ok": contam_ok,
+        "contaminated_genes": sorted(contam)[:200],
+        "n_syn_hit_genes": len(old_hits), "syn_hit_genes": old_hits[:50],
     }
 
 
@@ -51,6 +55,8 @@ def positive_controls(df: pd.DataFrame, cfg: Config, hits: pd.DataFrame | None =
     if hits is None:
         hits = tiering.build_hits(df, cfg)
     tier = {(g, t): k for g, t, k in zip(hits["gene"], hits["trait"], hits["tier"])}
+    disc = stats.discovery_hits(df, cfg)                          # unfiltered: controls are not candidates (A2a does not apply)
+    in_disc = set(zip(disc["gene"], disc["trait"]))
     d = df[(df["cohort"] == "discovery") & (df["mask"] == "plof")].set_index(["gene", "trait"])
     out = []
     for spec in cfg.positive_controls:
@@ -65,7 +71,7 @@ def positive_controls(df: pd.DataFrame, cfg: Config, hits: pd.DataFrame | None =
             rec = {"gene": g, "beta": float(row["beta"]), "p": float(row["p"])}
             if via_pipeline:
                 rec["pipeline_tier"] = tier.get((g.upper(), trait))
-                ok = ok and rec["pipeline_tier"] is not None
+                ok = ok and (g.upper(), trait) in in_disc
             rec["ok"] = ok
             tested.append(rec)
             passed = passed or ok

@@ -103,7 +103,7 @@ def test_synthetic_planted_signals(synth, cfg):
     assert (syn.p < cfg.discovery_p).sum() == 0
 
 
-@pytest.mark.parametrize("scenario", ["lead", "nolead", "broken_positive", "broken_lambda", "broken_syn_hit"])
+@pytest.mark.parametrize("scenario", ["lead", "nolead", "broken_positive", "broken_lambda", "broken_syn_hit", "contaminated_tierA", "contaminated_systemic", "contaminated_minor"])
 def test_synthetic_scenarios_build(synth, scenario):
     tables = synth.make_synthetic(scenario, n_genes=300)
     assert all(list(t.columns) == COLUMNS for t in tables.values())

@@ -147,9 +147,10 @@ def test_broken_controls_kill(make, scenario, failed):
         assert r["verdict"]["pass_genes"] == ["SYNPASS1"]
 
 
-def test_broken_syn_hit_only_syn_gene_is_reported(make):
+def test_broken_syn_hit_reports_contamination_beyond_bound(make):
     n = run(make("broken_syn_hit"))["controls"]["negative_synonymous"]
-    assert n["lambda_ok"] and not n["syn_hits_ok"] and n["syn_hit_genes"] == ["SYNSYN1"]
+    assert n["lambda_ok"] and not n["contamination_ok"] and "SYNSYN1" in n["contaminated_genes"]
+    assert n["contaminated_fraction"] > n["contaminated_max_fraction"]
 
 
 def test_missing_synonymous_rows_means_controls_not_evaluable(make):
